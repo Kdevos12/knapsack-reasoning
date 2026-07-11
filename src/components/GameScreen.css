@@ -1,0 +1,298 @@
+.game-screen {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  color: var(--text);
+}
+
+.game-header {
+  padding: 1rem 1.5rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.session-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-2);
+  margin-bottom: 0.85rem;
+  overflow: hidden;
+}
+
+.session-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.game-stats {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.stat-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 110px;
+}
+
+.stat-block .stat-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.gauge {
+  width: 110px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.gauge-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: var(--success);
+  transition: width 0.2s ease, background-color 0.2s ease;
+}
+
+.gauge-fill.over {
+  background: var(--danger);
+}
+
+.gauge-fill.partial {
+  background: var(--warning);
+}
+
+.feedback-panel {
+  margin: 0 1.5rem 1rem;
+  padding: 1rem 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.feedback-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.feedback-title.success {
+  color: var(--success);
+}
+
+.feedback-title.failure {
+  color: var(--warning);
+}
+
+.feedback-gauge-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.feedback-gauge {
+  width: 220px;
+}
+
+.feedback-pct {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.value-badge {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.value-badge small {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.weight-exceeded {
+  color: var(--danger);
+}
+
+.time-warning {
+  color: var(--warning);
+  font-weight: bold;
+}
+
+.game-board {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  padding: 2rem;
+  flex-grow: 1;
+  overflow-y: auto;
+}
+
+.item-tile {
+  position: relative;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 3px 8px rgba(0, 0, 0, 0.35);
+  color: #0f1115;
+  aspect-ratio: 1 / 1;
+  padding: 0;
+}
+
+/* Value: the quantity to maximise — dominant read. Tabular digits so
+   magnitudes align and compare at a glance across tiles. */
+.tile-value {
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/* Weight: a constraint already encoded by tile size — quiet reminder on a
+   fixed dark plate so it stays readable on any tile colour. */
+.tile-weight {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28em;
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(15, 17, 21, 0.6);
+  color: #e6e8eb;
+}
+
+/* Muted lowercase prefixes — the number stays the dominant read. */
+.tile-prefix {
+  font-size: 0.62em;
+  font-weight: 600;
+  opacity: 0.65;
+  margin-right: 0.15em;
+  letter-spacing: 0;
+}
+
+.item-tile.light-text {
+  color: #fff;
+}
+
+.board-legend {
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  padding: 0 1.5rem 0.75rem;
+}
+
+.item-tile:hover:not(.selected) {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4);
+  border-color: var(--accent);
+}
+
+.item-tile.selected {
+  color: white;
+  border-color: #8ce99a;
+  animation: pulse 1.6s infinite;
+}
+
+.item-tile.selected .tile-weight {
+  background: rgba(15, 17, 21, 0.35);
+}
+
+/* Feedback phase: the optimal solution is revealed for comparison. */
+.item-tile.optimal {
+  border-color: #ffd43b;
+  box-shadow: 0 0 0 3px rgba(255, 212, 59, 0.45), 0 3px 8px rgba(0, 0, 0, 0.35);
+  animation: none;
+}
+
+.item-tile.dimmed {
+  opacity: 0.35;
+}
+
+.feedback-hint {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(47, 158, 68, 0.5); }
+  70% { box-shadow: 0 0 0 10px rgba(47, 158, 68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(47, 158, 68, 0); }
+}
+
+.capacity-warning {
+  background: rgba(224, 49, 49, 0.15);
+  border: 1px solid var(--danger);
+  color: #ffa8a8;
+  padding: 0.75rem 1.25rem;
+  margin: 0 1.5rem 1rem;
+  border-radius: 6px;
+  text-align: center;
+  font-weight: 500;
+}
+
+.time-up-overlay {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--surface);
+  border: 1px solid var(--warning);
+  color: var(--text);
+  padding: 1.5rem 2rem;
+  border-radius: 10px;
+  text-align: center;
+  font-weight: 500;
+  z-index: 1000;
+}
+
+.game-actions {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  padding: 1.5rem;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.submit-button {
+  min-width: 160px;
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--success);
+  color: white;
+  transition: transform 0.15s ease;
+}
+
+.submit-button:hover {
+  transform: translateY(-2px);
+}

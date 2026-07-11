@@ -1,0 +1,122 @@
+.setup-screen {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1.5rem;
+  width: 100%;
+  color: var(--text);
+}
+
+.settings-group {
+  margin-bottom: 1.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.25rem;
+}
+
+.settings-group h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.mode-tabs {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.mode-tabs button {
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.mode-tabs button.active {
+  background: var(--accent-bg);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.help-text {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-top: 0.75rem;
+  line-height: 1.5;
+}
+
+.setting-row {
+  display: flex;
+  margin-bottom: 0.85rem;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.setting-row label {
+  flex: 0 0 220px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.setting-row input,
+.setting-row select {
+  flex: 1;
+  min-width: 100px;
+  padding: 0.6rem;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.save-button,
+.reset-button {
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.save-button {
+  background: var(--success);
+  color: white;
+  width: 100%;
+}
+
+.reset-button {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.save-button:hover,
+.reset-button:hover {
+  transform: translateY(-2px);
+}
+
+.credit-line {
+  text-align: center;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin: 1.5rem 0 0.5rem;
+}
+
+.credit-line a {
+  color: var(--text-muted);
+  text-decoration: underline;
+}
+
+.credit-line a:hover {
+  color: var(--accent);
+}

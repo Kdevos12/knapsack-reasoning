@@ -1,0 +1,220 @@
+import { useState } from 'react';
+import type { CorrelationType, SessionConfig, SessionMode, TimeMode } from '../types';
+import { DEFAULT_ADVANCED_PARAMS } from '../types';
+import { loadSavedDifficulty } from '../adaptiveEngine';
+import './SetupScreen.css';
+
+interface SetupScreenProps {
+  initialConfig: SessionConfig;
+  onStart: (config: SessionConfig) => void;
+}
+
+const CORRELATIONS: { value: CorrelationType; label: string }[] = [
+  { value: 'uncorrelated', label: 'Uncorrelated (easy)' },
+  { value: 'weakly_correlated', label: 'Weakly correlated' },
+  { value: 'strongly_correlated', label: 'Strongly correlated' },
+  { value: 'subset_sum', label: 'Subset sum (hard)' },
+];
+
+function SetupScreen({ initialConfig, onStart }: SetupScreenProps) {
+  const [config, setConfig] = useState<SessionConfig>(initialConfig);
+  const savedLevel = loadSavedDifficulty();
+
+  const set = <K extends keyof SessionConfig>(key: K, value: SessionConfig[K]) =>
+    setConfig((prev) => ({ ...prev, [key]: value }));
+
+  return (
+    <div className="setup-screen">
+      <h2>Session setup</h2>
+
+      <div className="settings-group">
+        <h3>Mode</h3>
+        <div className="mode-tabs">
+          {(['training', 'adaptive', 'advanced'] as SessionMode[]).map((m) => (
+            <button key={m} type="button" className={config.mode === m ? 'active' : ''} onClick={() => set('mode', m)}>
+              {m === 'training' ? 'Training' : m === 'adaptive' ? 'Adaptive' : 'Advanced'}
+            </button>
+          ))}
+        </div>
+        {config.mode === 'training' && (
+          <p className="help-text">Fixed difficulty, chosen with the slider below. No automatic adjustment.</p>
+        )}
+        {config.mode === 'adaptive' && (
+          <p className="help-text">
+            The engine raises the difficulty one step after 2 successes in a row, and lowers it one step after each
+            failure (2-down/1-up staircase, converging to ~70% success rate).
+            {savedLevel !== null && <> Your saved level: <strong>{savedLevel}</strong> — the session resumes from there.</>}
+          </p>
+        )}
+        {config.mode === 'advanced' && <p className="help-text">You control every generation parameter directly.</p>}
+      </div>
+
+      {config.mode === 'training' && (
+        <div className="settings-group">
+          <label>
+            Difficulty ({config.trainingDifficulty})
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={config.trainingDifficulty}
+              onChange={(e) => set('trainingDifficulty', Number(e.target.value))}
+            />
+          </label>
+        </div>
+      )}
+
+      {config.mode === 'advanced' && (
+        <div className="settings-group">
+          <div className="setting-row">
+            <label>Number of items</label>
+            <input
+              type="number"
+              min={2}
+              max={20}
+              value={config.advancedParams.nItems}
+              onChange={(e) => set('advancedParams', { ...config.advancedParams, nItems: Number(e.target.value) })}
+            />
+          </div>
+          <div className="setting-row">
+            <label>Weight min / max</label>
+            <input
+              type="number"
+              min={1}
+              value={config.advancedParams.weightRange[0]}
+              onChange={(e) =>
+                set('advancedParams', {
+                  ...config.advancedParams,
+                  weightRange: [Number(e.target.value), config.advancedParams.weightRange[1]],
+                })
+              }
+            />
+            <input
+              type="number"
+              min={1}
+              value={config.advancedParams.weightRange[1]}
+              onChange={(e) =>
+                set('advancedParams', {
+                  ...config.advancedParams,
+                  weightRange: [config.advancedParams.weightRange[0], Number(e.target.value)],
+                })
+              }
+            />
+          </div>
+          <div className="setting-row">
+            <label>Value min / max</label>
+            <input
+              type="number"
+              min={1}
+              value={config.advancedParams.valueRange[0]}
+              onChange={(e) =>
+                set('advancedParams', {
+                  ...config.advancedParams,
+                  valueRange: [Number(e.target.value), config.advancedParams.valueRange[1]],
+                })
+              }
+            />
+            <input
+              type="number"
+              min={1}
+              value={config.advancedParams.valueRange[1]}
+              onChange={(e) =>
+                set('advancedParams', {
+                  ...config.advancedParams,
+                  valueRange: [config.advancedParams.valueRange[0], Number(e.target.value)],
+                })
+              }
+            />
+          </div>
+          <div className="setting-row">
+            <label>Capacity (% of total weight)</label>
+            <input
+              type="number"
+              min={10}
+              max={90}
+              value={Math.round(config.advancedParams.capacityRatio * 100)}
+              onChange={(e) =>
+                set('advancedParams', { ...config.advancedParams, capacityRatio: Number(e.target.value) / 100 })
+              }
+            />
+          </div>
+          <div className="setting-row">
+            <label>Weight/value correlation</label>
+            <select
+              value={config.advancedParams.correlation}
+              onChange={(e) =>
+                set('advancedParams', { ...config.advancedParams, correlation: e.target.value as CorrelationType })
+              }
+            >
+              {CORRELATIONS.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button type="button" className="reset-button" onClick={() => set('advancedParams', DEFAULT_ADVANCED_PARAMS)}>
+            Reset these parameters
+          </button>
+        </div>
+      )}
+
+      <div className="settings-group">
+        <h3>Rounds</h3>
+        <div className="setting-row">
+          <label>Number of rounds</label>
+          <input type="number" min={1} max={50} value={config.rounds} onChange={(e) => set('rounds', Number(e.target.value))} />
+        </div>
+      </div>
+
+      <div className="settings-group">
+        <h3>Time</h3>
+        <div className="mode-tabs">
+          {(['none', 'timed'] as TimeMode[]).map((tm) => (
+            <button key={tm} type="button" className={config.timeMode === tm ? 'active' : ''} onClick={() => set('timeMode', tm)}>
+              {tm === 'none' ? 'No limit' : 'Time limit'}
+            </button>
+          ))}
+        </div>
+        {config.timeMode === 'timed' && (
+          <div className="setting-row" style={{ marginTop: '0.85rem' }}>
+            <label>Seconds per round</label>
+            <input
+              type="number"
+              min={5}
+              value={config.timeLimitSeconds}
+              onChange={(e) => set('timeLimitSeconds', Number(e.target.value))}
+            />
+          </div>
+        )}
+      </div>
+
+      <div className="settings-group">
+        <h3>Sound</h3>
+        <div className="setting-row">
+          <label htmlFor="sound-toggle">Success chime</label>
+          <input
+            id="sound-toggle"
+            type="checkbox"
+            style={{ flex: 'none', width: '1.2rem', height: '1.2rem' }}
+            checked={config.soundEnabled}
+            onChange={(e) => set('soundEnabled', e.target.checked)}
+          />
+        </div>
+      </div>
+
+      <button type="button" className="save-button" onClick={() => onStart(config)}>
+        Start session
+      </button>
+
+      <p className="credit-line">
+        Built with the support of the{' '}
+        <a href="https://discord.gg/jjzA5m5UjN" target="_blank" rel="noopener noreferrer">
+          Mindbuilding community
+        </a>
+      </p>
+    </div>
+  );
+}
+
+export default SetupScreen;

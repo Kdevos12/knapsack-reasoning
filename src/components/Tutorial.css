@@ -1,0 +1,65 @@
+.tutorial {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1.5rem;
+  width: 100%;
+  color: var(--text);
+}
+
+.tutorial-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.25rem;
+  margin-bottom: 1.25rem;
+  line-height: 1.6;
+}
+
+.tutorial-card h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1rem;
+  color: var(--accent);
+}
+
+.tutorial-card p,
+.tutorial-card ul {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--text-muted);
+}
+
+.tutorial-card ul {
+  padding-left: 1.2rem;
+}
+
+.tutorial-card li {
+  margin-bottom: 0.35rem;
+}
+
+.tutorial-card strong {
+  color: var(--text);
+}
+
+.tutorial-card dl {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--text-muted);
+}
+
+.tutorial-card dt {
+  font-weight: 700;
+  color: var(--text);
+  margin-top: 0.75rem;
+}
+
+.tutorial-card dt:first-child {
+  margin-top: 0;
+}
+
+.tutorial-card dd {
+  margin: 0.2rem 0 0;
+}
+
+.tutorial-card dd ul {
+  margin-top: 0.3rem;
+}
