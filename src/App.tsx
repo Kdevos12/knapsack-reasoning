@@ -10,20 +10,31 @@ import {
   saveDifficulty,
   type StaircaseState,
 } from './adaptiveEngine';
-import { difficultyToParams, generateInstance } from './instanceGenerator';
+import { difficultyToParams, drawCorrelation, generateInstance, type CorrelationBag } from './instanceGenerator';
 import { solveKnapsack } from './knapsackSolver';
 import { playSuccessChime } from './sound';
-import type { SessionConfig, SolvedInstance, Trial } from './types';
+import type { CorrelationType, GenerationParams, SessionConfig, SolvedInstance, Trial } from './types';
 import { DEFAULT_SESSION_CONFIG, SUCCESS_QUALITY_THRESHOLD } from './types';
 import './App.css';
 
 type View = 'setup' | 'game' | 'history' | 'tutorial';
 type Phase = 'playing' | 'feedback';
 
-function paramsForConfig(config: SessionConfig, staircase: StaircaseState | null) {
-  if (config.mode === 'advanced') return config.advancedParams;
+// Correlation is drawn separately from the rest of the params (see
+// drawCorrelation) so it can be shuffled across the unlocked pool instead of
+// being pinned to whatever tier the current difficulty scalar sits in.
+function paramsForConfig(
+  config: SessionConfig,
+  staircase: StaircaseState | null,
+  bag: CorrelationBag | null,
+): { params: GenerationParams; bag: CorrelationBag } {
+  if (config.mode === 'advanced') {
+    return { params: config.advancedParams, bag: bag ?? { pool: [], queue: [], lastDrawn: null } };
+  }
   const difficulty = config.mode === 'training' ? config.trainingDifficulty : staircase!.difficulty;
-  return difficultyToParams(difficulty);
+  const base = difficultyToParams(difficulty);
+  const { correlation, bag: nextBag } = drawCorrelation(difficulty, bag, Math.random);
+  return { params: { ...base, correlation }, bag: nextBag };
 }
 
 function App() {
@@ -31,8 +42,10 @@ function App() {
   const [config, setConfig] = useState<SessionConfig>(DEFAULT_SESSION_CONFIG);
 
   const [staircase, setStaircase] = useState<StaircaseState | null>(null);
+  const [correlationBag, setCorrelationBag] = useState<CorrelationBag | null>(null);
   const [round, setRound] = useState(0);
   const [instance, setInstance] = useState<SolvedInstance | null>(null);
+  const [currentCorrelation, setCurrentCorrelation] = useState<CorrelationType>('uncorrelated');
   const [selected, setSelected] = useState<boolean[]>([]);
   const [trials, setTrials] = useState<Trial[]>([]);
   const [phase, setPhase] = useState<Phase>('playing');
@@ -44,8 +57,10 @@ function App() {
 
   const currentDifficulty = config.mode === 'training' ? config.trainingDifficulty : staircase?.difficulty ?? 0;
 
-  const spawnProblem = useCallback((cfg: SessionConfig, sc: StaircaseState | null) => {
-    const params = paramsForConfig(cfg, sc);
+  const spawnProblem = useCallback((cfg: SessionConfig, sc: StaircaseState | null, bag: CorrelationBag | null) => {
+    const { params, bag: nextBag } = paramsForConfig(cfg, sc, bag);
+    setCorrelationBag(nextBag);
+    setCurrentCorrelation(params.correlation);
     const solved = solveKnapsack(generateInstance(params, Math.floor(Math.random() * 2 ** 31)));
     setInstance(solved);
     setSelected(new Array(solved.weights.length).fill(false));
@@ -64,7 +79,8 @@ function App() {
       setStaircase(sc);
       setRound(0);
       setTrials([]);
-      spawnProblem(cfg, sc);
+      // Fresh bag each session — the shuffle only needs to hold within one run.
+      spawnProblem(cfg, sc, null);
       setView('game');
     },
     [spawnProblem],
@@ -109,7 +125,15 @@ function App() {
     const timeUsedMs = Date.now() - startedAtRef.current;
     const timeLimitMs = config.timeMode === 'timed' ? config.timeLimitSeconds * 1000 : null;
 
-    const trial: Trial = { round, difficulty: currentDifficulty, success, qualityRatio, timeUsedMs, timeLimitMs };
+    const trial: Trial = {
+      round,
+      difficulty: currentDifficulty,
+      correlation: currentCorrelation,
+      success,
+      qualityRatio,
+      timeUsedMs,
+      timeLimitMs,
+    };
     setTrials((prev) => [...prev, trial]);
     setLastTrial(trial);
     setPhase('feedback');
@@ -121,7 +145,7 @@ function App() {
       setStaircase(next);
       saveDifficulty(next.difficulty);
     }
-  }, [instance, selected, round, config, staircase, currentDifficulty, phase]);
+  }, [instance, selected, round, config, staircase, currentDifficulty, currentCorrelation, phase]);
 
   const nextRound = useCallback(() => {
     if (round + 1 >= config.rounds) {
@@ -129,8 +153,8 @@ function App() {
       return;
     }
     setRound((r) => r + 1);
-    spawnProblem(config, staircase);
-  }, [round, config, staircase, spawnProblem]);
+    spawnProblem(config, staircase, correlationBag);
+  }, [round, config, staircase, correlationBag, spawnProblem]);
 
   return (
     <div className="app">
@@ -171,6 +195,7 @@ function App() {
             round={round}
             config={config}
             difficulty={currentDifficulty}
+            correlation={currentCorrelation}
           />
         )}
 

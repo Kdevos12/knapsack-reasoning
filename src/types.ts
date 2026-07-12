@@ -17,6 +17,16 @@ export type CorrelationType =
   | 'strongly_correlated'
   | 'subset_sum';
 
+// Shared with SetupScreen (advanced mode picker), GameScreen (round badge)
+// and SessionHistory (heuristic-mix breakdown) so the label text and the
+// four regimes stay in one place.
+export const CORRELATION_LABELS: Record<CorrelationType, string> = {
+  uncorrelated: 'Uncorrelated',
+  weakly_correlated: 'Weakly correlated',
+  strongly_correlated: 'Strongly correlated',
+  subset_sum: 'Subset sum',
+};
+
 export interface GenerationParams {
   nItems: number;
   weightRange: [number, number];
@@ -42,6 +52,7 @@ export interface SessionConfig {
 export interface Trial {
   round: number;
   difficulty: number;
+  correlation: CorrelationType;
   success: boolean;
   qualityRatio: number; // achievedValue / optimalValue, in [0,1]
   timeUsedMs: number;

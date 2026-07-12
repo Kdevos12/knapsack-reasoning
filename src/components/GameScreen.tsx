@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
-import type { SessionConfig, SolvedInstance, Trial } from '../types';
+import type { CorrelationType, SessionConfig, SolvedInstance, Trial } from '../types';
+import { CORRELATION_LABELS } from '../types';
 import './GameScreen.css';
 
 interface GameScreenProps {
@@ -15,6 +16,7 @@ interface GameScreenProps {
   round: number;
   config: SessionConfig;
   difficulty: number;
+  correlation: CorrelationType;
 }
 
 // Tile encoding follows Murawski & Bossaerts (2016, Sci. Rep.): tile size
@@ -36,6 +38,7 @@ function GameScreen({
   round,
   config,
   difficulty,
+  correlation,
 }: GameScreenProps) {
   const totalWeight = selected.reduce((s, on, i) => (on ? s + instance.weights[i] : s), 0);
   const totalValue = selected.reduce((s, on, i) => (on ? s + instance.values[i] : s), 0);
@@ -71,6 +74,10 @@ function GameScreen({
           <div className="stat-block">
             <span className="stat-label">Difficulty</span>
             <span>{Math.round(difficulty)}</span>
+          </div>
+          <div className="stat-block">
+            <span className="stat-label">Regime</span>
+            <span>{CORRELATION_LABELS[correlation]}</span>
           </div>
           <div className="stat-block">
             <span className="stat-label">

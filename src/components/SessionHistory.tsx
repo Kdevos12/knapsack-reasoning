@@ -1,4 +1,5 @@
-import type { SessionConfig, Trial } from '../types';
+import type { CorrelationType, SessionConfig, Trial } from '../types';
+import { CORRELATION_LABELS } from '../types';
 import './SessionHistory.css';
 
 interface SessionHistoryProps {
@@ -7,12 +8,18 @@ interface SessionHistoryProps {
   onNewSession: () => void;
 }
 
+const ALL_CORRELATIONS = Object.keys(CORRELATION_LABELS) as CorrelationType[];
+
 function SessionHistory({ trials, config, onNewSession }: SessionHistoryProps) {
   const total = trials.length;
   const successCount = trials.filter((t) => t.success).length;
   const successRate = total > 0 ? (successCount / total) * 100 : 0;
   const avgQuality = total > 0 ? (trials.reduce((s, t) => s + t.qualityRatio, 0) / total) * 100 : 0;
   const finalDifficulty = trials.length > 0 ? trials[trials.length - 1].difficulty : config.trainingDifficulty;
+  const correlationCounts = ALL_CORRELATIONS.map((c) => ({
+    type: c,
+    count: trials.filter((t) => t.correlation === c).length,
+  })).filter((c) => c.count > 0);
 
   return (
     <div className="session-history">
@@ -37,6 +44,32 @@ function SessionHistory({ trials, config, onNewSession }: SessionHistoryProps) {
         </div>
       </div>
 
+      {correlationCounts.length > 0 && (
+        <div className="trial-list">
+          <h3>Heuristic mix</h3>
+          <p className="help-text">
+            How many rounds pulled from each weight/value regime — the tool's premise is that switching between
+            these (not just raw difficulty) is what forces you off a single static strategy.
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>Regime</th>
+                <th>Rounds</th>
+              </tr>
+            </thead>
+            <tbody>
+              {correlationCounts.map(({ type, count }) => (
+                <tr key={type}>
+                  <td>{CORRELATION_LABELS[type]}</td>
+                  <td>{count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       <div className="trial-list">
         <h3>Round details</h3>
         {total === 0 ? (
@@ -47,6 +80,7 @@ function SessionHistory({ trials, config, onNewSession }: SessionHistoryProps) {
               <tr>
                 <th>Round</th>
                 <th>Difficulty</th>
+                <th>Regime</th>
                 <th>Result</th>
                 <th>Optimality</th>
                 <th>Time</th>
@@ -57,6 +91,7 @@ function SessionHistory({ trials, config, onNewSession }: SessionHistoryProps) {
                 <tr key={i} className={t.success ? 'success' : 'failure'}>
                   <td>{t.round + 1}</td>
                   <td>{Math.round(t.difficulty)}</td>
+                  <td>{CORRELATION_LABELS[t.correlation]}</td>
                   <td>{t.success ? 'Optimal' : 'Sub-optimal'}</td>
                   <td>{(t.qualityRatio * 100).toFixed(0)}%</td>
                   <td>{(t.timeUsedMs / 1000).toFixed(1)}s</td>
