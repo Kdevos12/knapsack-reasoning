@@ -6,18 +6,28 @@ function lerp(min: number, max: number, t: number): number {
   return min + (max - min) * Math.max(0, Math.min(1, t));
 }
 
+// Empirically measured (see repo history): greedy-by-ratio's success rate
+// against the exact DP optimum climbs toward 100% as nItems grows, *at any*
+// fixed correlation type — more items let a naive fill converge on the
+// packing regardless of structure (a fixed-ratio-band greedy heuristic
+// approaches the LP relaxation as n grows). Item count is capped well below
+// where that washout kicks in, so it can't become the difficulty lever;
+// spread has no such effect (measured flat) and keeps scaling freely.
+const MAX_EXTRA_ITEMS = 10;
+
 // Deterministic difficulty -> generation params mapping (everything except
 // correlation, which is drawn separately — see unlockedCorrelations/
 // drawCorrelation below). One monotonic table, no search/optimization loop:
 // item count and ranges scale directly with the requested difficulty scalar.
 // 0-100 is the tuned "core" range; there is no ceiling above that — the
-// adaptive staircase can push difficulty past 100 indefinitely, so item
-// count and spread keep growing (sqrt-scaled, so the exact DP solver stays
-// fast) instead of freezing every instance at its difficulty-100 shape.
+// adaptive staircase can push difficulty past 100 indefinitely, so spread
+// and correlationTightness keep growing (nItems is capped, see
+// MAX_EXTRA_ITEMS) instead of freezing every instance at its difficulty-100
+// shape.
 export function difficultyToParams(difficulty: number): Omit<GenerationParams, 'correlation'> {
   const t = Math.min(1, difficulty / 100);
   const over = Math.max(0, difficulty - 100);
-  const extraItems = Math.floor(Math.sqrt(over));
+  const extraItems = Math.min(MAX_EXTRA_ITEMS, Math.floor(Math.sqrt(over)));
   const extraSpread = Math.round(Math.sqrt(over) * 4);
 
   const nItems = Math.round(lerp(SAFETY_BOUNDS.nItemsMin, SAFETY_BOUNDS.nItemsMax, t)) + extraItems;
@@ -28,11 +38,19 @@ export function difficultyToParams(difficulty: number): Omit<GenerationParams, '
   // items plausibly fit and the choice isn't a tight packing puzzle.
   const capacityRatio = lerp(0.72, 0.5, t);
 
+  // How tightly weakly/strongly/subset_sum cluster value around weight (see
+  // generateInstance). Keeps tightening slowly for a long stretch past 100
+  // instead of settling at its difficulty-100 value forever — measured to
+  // hold correlated regimes' greedy-failure rate roughly flat out to
+  // difficulty 2000+ rather than letting it erode back toward 0.
+  const correlationTightness = Math.min(1, difficulty / 400);
+
   return {
     nItems,
     weightRange: [1, spread],
     valueRange: [1, spread],
     capacityRatio,
+    correlationTightness,
   };
 }
 
@@ -95,23 +113,37 @@ export function drawCorrelation(
 
 export function generateInstance(params: GenerationParams, seed: number = Date.now()): KnapsackInstance {
   const rng = mulberry32(seed);
-  const { nItems, weightRange, valueRange, capacityRatio, correlation } = params;
+  const { nItems, weightRange, valueRange, capacityRatio, correlation, correlationTightness = 0 } = params;
 
   const weights = Array.from({ length: nItems }, () => randInt(rng, weightRange[0], weightRange[1]));
   const [vMin, vMax] = valueRange;
+  const span = vMax - vMin;
 
   const values = weights.map((w) => {
     switch (correlation) {
       case 'uncorrelated':
         return randInt(rng, vMin, vMax);
       case 'weakly_correlated': {
-        const jitter = Math.round((vMax - vMin) * 0.2) || 1;
+        const jitter = Math.max(1, Math.round(span * lerp(0.2, 0.06, correlationTightness)));
         return Math.max(vMin, Math.min(vMax, w + randInt(rng, -jitter, jitter)));
       }
-      case 'strongly_correlated':
-        return Math.max(vMin, Math.min(vMax, w + Math.round((vMax - vMin) * 0.1)));
-      case 'subset_sum':
-        return Math.max(vMin, Math.min(vMax, w));
+      case 'strongly_correlated': {
+        const offset = Math.max(1, Math.round(span * lerp(0.1, 0.04, correlationTightness)));
+        return Math.max(vMin, Math.min(vMax, w + offset));
+      }
+      case 'subset_sum': {
+        // Not literal value = weight: random subset-sum instances are
+        // provably easy on average (Borgs et al.; "almost all subset sum
+        // problems are easy") — measured here to be *more* greedy-solvable
+        // than strongly_correlated once nItems grows, because a dead ratio
+        // tie lets a naive fill land near-optimal by sheer combinatorics.
+        // A small but tighter-than-strongly_correlated offset keeps ratios
+        // distinguishable-but-nearly-tied, which is what actually resists a
+        // ratio-sort heuristic — measured to hold up across the full
+        // difficulty range instead of washing out.
+        const offset = Math.max(1, Math.round(span * lerp(0.05, 0.005, correlationTightness)));
+        return Math.max(vMin, Math.min(vMax, w + offset));
+      }
       default:
         return randInt(rng, vMin, vMax);
     }

@@ -33,6 +33,11 @@ export interface GenerationParams {
   valueRange: [number, number];
   capacityRatio: number; // capacity = round(totalWeight * capacityRatio)
   correlation: CorrelationType;
+  // 0-1, how tightly weakly/strongly/subset_sum cluster value around weight
+  // (see instanceGenerator.generateInstance). Defaults to 0 (loosest) when
+  // omitted — only training/adaptive modes (via difficultyToParams) drive it
+  // above 0; advanced mode's manual params are unaffected.
+  correlationTightness?: number;
 }
 
 export type SessionMode = 'training' | 'advanced' | 'adaptive';
