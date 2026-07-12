@@ -233,6 +233,12 @@ function App() {
 
         {view === 'tutorial' && <Tutorial />}
       </main>
+
+      <footer className="app-footer">
+        <a href="https://github.com/Kdevos12/knapsack-reasoning" target="_blank" rel="noopener noreferrer">
+          github.com/Kdevos12/knapsack-reasoning
+        </a>
+      </footer>
     </div>
   );
 }
