@@ -145,7 +145,7 @@ function injectGreedyTrap(
 // integration process in human decision-making, distinct from single-value
 // comparison. Measured: a naive "rank by dimension-1 ratio only" strategy
 // (the trained 1D heuristic) drops from ~50% success at unlock down to 2-4%
-// by difficulty ~1000 and holds there.
+// within a few hundred difficulty points and holds there.
 //
 // The exact 2D DP is O(n * capacity1 * capacity2) in both time AND memory
 // (it keeps the full table to backtrack the optimal selection — see
@@ -153,7 +153,7 @@ function injectGreedyTrap(
 // spread is clamped whenever dim2 is active: without this, an elite-tier
 // player's spread (already in the hundreds by difficulty ~50,000) would
 // blow the DP table up to tens of millions of cells.
-const DIM2_START_DIFFICULTY = 250;
+const DIM2_START_DIFFICULTY = 75;
 const DIM2_GROWTH_RATE = 400;
 export const MAX_SPREAD_WITH_DIM2 = SAFETY_BOUNDS.weightMax;
 
