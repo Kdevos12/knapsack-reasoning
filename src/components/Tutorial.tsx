@@ -29,16 +29,14 @@ function Tutorial() {
         <h3>Modes</h3>
         <ul>
           <li>
-            <strong>Training</strong> — fixed difficulty you pick with a slider (0–100). Good for practising at a
-            steady level.
-          </li>
-          <li>
             <strong>Adaptive</strong> — the difficulty adjusts itself: two successes in a row move it up one step, one
             failure moves it down one step. Over a session it settles at the level where you succeed about 70% of the
             time — the sweet spot for training. Your level is saved between sessions.
           </li>
           <li>
-            <strong>Advanced</strong> — you set every generation parameter manually (details below).
+            <strong>Advanced</strong> — you set every generation parameter manually (details below). Use "Seed from
+            difficulty" to fill every field from a fixed difficulty number in one click — the same formulas adaptive
+            mode uses, just pinned instead of self-adjusting — then hand-tune anything from there.
           </li>
         </ul>
       </section>

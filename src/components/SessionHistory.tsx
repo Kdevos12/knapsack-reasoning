@@ -1,21 +1,20 @@
-import type { CorrelationType, SessionConfig, Trial } from '../types';
+import type { CorrelationType, Trial } from '../types';
 import { CORRELATION_LABELS } from '../types';
 import './SessionHistory.css';
 
 interface SessionHistoryProps {
   trials: Trial[];
-  config: SessionConfig;
   onNewSession: () => void;
 }
 
 const ALL_CORRELATIONS = Object.keys(CORRELATION_LABELS) as CorrelationType[];
 
-function SessionHistory({ trials, config, onNewSession }: SessionHistoryProps) {
+function SessionHistory({ trials, onNewSession }: SessionHistoryProps) {
   const total = trials.length;
   const successCount = trials.filter((t) => t.success).length;
   const successRate = total > 0 ? (successCount / total) * 100 : 0;
   const avgQuality = total > 0 ? (trials.reduce((s, t) => s + t.qualityRatio, 0) / total) * 100 : 0;
-  const finalDifficulty = trials.length > 0 ? trials[trials.length - 1].difficulty : config.trainingDifficulty;
+  const finalDifficulty = trials.length > 0 ? trials[trials.length - 1].difficulty : 0;
   const correlationCounts = ALL_CORRELATIONS.map((c) => ({
     type: c,
     count: trials.filter((t) => t.correlation === c).length,

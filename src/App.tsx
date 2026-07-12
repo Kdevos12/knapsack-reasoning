@@ -31,7 +31,7 @@ function paramsForConfig(
   if (config.mode === 'advanced') {
     return { params: config.advancedParams, bag: bag ?? { pool: [], queue: [], lastDrawn: null } };
   }
-  const difficulty = config.mode === 'training' ? config.trainingDifficulty : staircase!.difficulty;
+  const difficulty = staircase!.difficulty;
   const base = difficultyToParams(difficulty);
   const { correlation, bag: nextBag } = drawCorrelation(difficulty, bag, Math.random);
   return { params: { ...base, correlation }, bag: nextBag };
@@ -55,7 +55,7 @@ function App() {
   const [timedOut, setTimedOut] = useState(false);
   const startedAtRef = useRef<number>(0);
 
-  const currentDifficulty = config.mode === 'training' ? config.trainingDifficulty : staircase?.difficulty ?? 0;
+  const currentDifficulty = staircase?.difficulty ?? 0;
 
   const spawnProblem = useCallback((cfg: SessionConfig, sc: StaircaseState | null, bag: CorrelationBag | null) => {
     const { params, bag: nextBag } = paramsForConfig(cfg, sc, bag);
@@ -199,9 +199,7 @@ function App() {
           />
         )}
 
-        {view === 'history' && (
-          <SessionHistory trials={trials} config={config} onNewSession={() => setView('setup')} />
-        )}
+        {view === 'history' && <SessionHistory trials={trials} onNewSession={() => setView('setup')} />}
 
         {view === 'tutorial' && <Tutorial />}
       </main>

@@ -35,8 +35,8 @@ export interface GenerationParams {
   correlation: CorrelationType;
   // 0-1, how tightly weakly/strongly/subset_sum cluster value around weight
   // (see instanceGenerator.generateInstance). Defaults to 0 (loosest) when
-  // omitted — only training/adaptive modes (via difficultyToParams) drive it
-  // above 0; advanced mode's manual params are unaffected.
+  // omitted — adaptive mode (via difficultyToParams) drives it above 0;
+  // advanced mode's manual params start at 0 unless hand-tuned or seeded.
   correlationTightness?: number;
   // A deterministic (not statistical) greedy-defeating construction — see
   // instanceGenerator.injectGreedyTrap. Correlation-tightness alone plateaus
@@ -46,7 +46,12 @@ export interface GenerationParams {
   trap?: { decoyWasteFrac: number; marginFrac: number };
 }
 
-export type SessionMode = 'training' | 'advanced' | 'adaptive';
+// 'training' (fixed-difficulty, no auto-adjustment) was removed: advanced
+// mode's "seed from difficulty" control (SetupScreen) reuses the exact same
+// difficultyToParams/unlockedCorrelations formulas to fill in a one-shot
+// fixed-difficulty config, then lets it be hand-tuned — a strict superset of
+// what training mode offered, so keeping both was redundant surface area.
+export type SessionMode = 'advanced' | 'adaptive';
 export type TimeMode = 'none' | 'timed';
 
 // One round = one problem.
@@ -55,7 +60,6 @@ export interface SessionConfig {
   rounds: number;
   timeMode: TimeMode;
   timeLimitSeconds: number; // per round, used when timeMode === 'timed'
-  trainingDifficulty: number; // 0-100, used when mode === 'training'
   advancedParams: GenerationParams; // used when mode === 'advanced'
   soundEnabled: boolean;
 }
@@ -75,8 +79,7 @@ export const SAFETY_BOUNDS = {
   // No upper bound: the adaptive staircase (adaptiveEngine.ts) is only
   // floor-clamped so skilled players keep climbing instead of pinning at a
   // ceiling. 100 remains the tuned "full difficulty" reference point that
-  // instanceGenerator.ts scales tiers against, and the manual training slider
-  // still stops there since that's an explicit user choice, not the staircase.
+  // instanceGenerator.ts scales tiers against.
   nItemsMin: 4,
   nItemsMax: 14,
   capacityRatioMin: 0.4,
@@ -105,7 +108,6 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   rounds: 10,
   timeMode: 'timed',
   timeLimitSeconds: 90,
-  trainingDifficulty: 25,
   advancedParams: DEFAULT_ADVANCED_PARAMS,
   soundEnabled: true,
 };

@@ -25,11 +25,11 @@ function SetupScreen({ initialConfig, onStart }: SetupScreenProps) {
   const set = <K extends keyof SessionConfig>(key: K, value: SessionConfig[K]) =>
     setConfig((prev) => ({ ...prev, [key]: value }));
 
-  // Reuses the exact same formulas the adaptive/training engine runs at this
-  // difficulty (item count, spread, capacity ratio, correlation tightness,
-  // greedy-trap strength), picking the hardest currently-unlocked
-  // correlation as a starting point — then it's just a normal advanced-mode
-  // config the fields below can hand-tune further.
+  // Reuses the exact same formulas adaptive mode runs at this difficulty
+  // (item count, spread, capacity ratio, correlation tightness, greedy-trap
+  // strength), picking the hardest currently-unlocked correlation as a
+  // starting point — then it's just a normal advanced-mode config the fields
+  // below can hand-tune further.
   const seedFromDifficulty = () => {
     const base = difficultyToParams(seedDifficulty);
     const pool = unlockedCorrelations(seedDifficulty);
@@ -43,15 +43,12 @@ function SetupScreen({ initialConfig, onStart }: SetupScreenProps) {
       <div className="settings-group">
         <h3>Mode</h3>
         <div className="mode-tabs">
-          {(['training', 'adaptive', 'advanced'] as SessionMode[]).map((m) => (
+          {(['adaptive', 'advanced'] as SessionMode[]).map((m) => (
             <button key={m} type="button" className={config.mode === m ? 'active' : ''} onClick={() => set('mode', m)}>
-              {m === 'training' ? 'Training' : m === 'adaptive' ? 'Adaptive' : 'Advanced'}
+              {m === 'adaptive' ? 'Adaptive' : 'Advanced'}
             </button>
           ))}
         </div>
-        {config.mode === 'training' && (
-          <p className="help-text">Fixed difficulty, chosen with the slider below. No automatic adjustment.</p>
-        )}
         {config.mode === 'adaptive' && (
           <p className="help-text">
             The engine raises the difficulty one step after 2 successes in a row, and lowers it one step after each
@@ -59,23 +56,13 @@ function SetupScreen({ initialConfig, onStart }: SetupScreenProps) {
             {savedLevel !== null && <> Your saved level: <strong>{savedLevel}</strong> — the session resumes from there.</>}
           </p>
         )}
-        {config.mode === 'advanced' && <p className="help-text">You control every generation parameter directly.</p>}
+        {config.mode === 'advanced' && (
+          <p className="help-text">
+            You control every generation parameter directly — use "Seed from difficulty" for a one-shot fixed-difficulty
+            fill, or hand-tune each field for a specific fixed instance shape.
+          </p>
+        )}
       </div>
-
-      {config.mode === 'training' && (
-        <div className="settings-group">
-          <label>
-            Difficulty ({config.trainingDifficulty})
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={config.trainingDifficulty}
-              onChange={(e) => set('trainingDifficulty', Number(e.target.value))}
-            />
-          </label>
-        </div>
-      )}
 
       {config.mode === 'advanced' && (
         <div className="settings-group">
@@ -204,7 +191,7 @@ function SetupScreen({ initialConfig, onStart }: SetupScreenProps) {
           </div>
           <p className="help-text">
             Tightness and greedy trap are the two levers that keep a naive value/weight-ratio strategy from working —
-            see the training/adaptive engine, which drives both automatically from a single difficulty number.
+            adaptive mode drives both automatically from a single difficulty number.
           </p>
           <button type="button" className="reset-button" onClick={() => set('advancedParams', DEFAULT_ADVANCED_PARAMS)}>
             Reset these parameters
