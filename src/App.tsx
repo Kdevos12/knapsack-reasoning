@@ -10,7 +10,14 @@ import {
   saveDifficulty,
   type StaircaseState,
 } from './adaptiveEngine';
-import { difficultyToParams, drawCorrelation, generateInstance, type CorrelationBag } from './instanceGenerator';
+import {
+  difficultyToParams,
+  drawCorrelation,
+  drawDim2,
+  generateInstance,
+  type CorrelationBag,
+  type Dim2Bag,
+} from './instanceGenerator';
 import { solveKnapsack } from './knapsackSolver';
 import { playSuccessChime } from './sound';
 import type { CorrelationType, GenerationParams, SessionConfig, SolvedInstance, Trial } from './types';
@@ -27,14 +34,28 @@ function paramsForConfig(
   config: SessionConfig,
   staircase: StaircaseState | null,
   bag: CorrelationBag | null,
-): { params: GenerationParams; bag: CorrelationBag } {
+  dim2Bag: Dim2Bag | null,
+): { params: GenerationParams; bag: CorrelationBag; dim2Bag: Dim2Bag } {
   if (config.mode === 'advanced') {
-    return { params: config.advancedParams, bag: bag ?? { pool: [], queue: [], lastDrawn: null } };
+    return {
+      params: config.advancedParams,
+      bag: bag ?? { pool: [], queue: [], lastDrawn: null },
+      dim2Bag: dim2Bag ?? { unlocked: false, queue: [] },
+    };
   }
   const difficulty = staircase!.difficulty;
   const base = difficultyToParams(difficulty);
   const { correlation, bag: nextBag } = drawCorrelation(difficulty, bag, Math.random);
-  return { params: { ...base, correlation }, bag: nextBag };
+  // dim2 is capped to ~1-in-5 rounds (see drawDim2) rather than applying to
+  // every unlocked round, so it stays a special case to recognize instead of
+  // crowding out correlation-regime switching. A dim2 round replaces the
+  // trap for that round rather than combining with it (see the interference
+  // note in generateInstance).
+  const { dim2, bag: nextDim2Bag } = drawDim2(difficulty, dim2Bag, Math.random);
+  const params: GenerationParams = dim2
+    ? { ...base, correlation, dim2, trap: undefined }
+    : { ...base, correlation, dim2: undefined };
+  return { params, bag: nextBag, dim2Bag: nextDim2Bag };
 }
 
 function App() {
@@ -43,6 +64,7 @@ function App() {
 
   const [staircase, setStaircase] = useState<StaircaseState | null>(null);
   const [correlationBag, setCorrelationBag] = useState<CorrelationBag | null>(null);
+  const [dim2Bag, setDim2Bag] = useState<Dim2Bag | null>(null);
   const [round, setRound] = useState(0);
   const [instance, setInstance] = useState<SolvedInstance | null>(null);
   const [currentCorrelation, setCurrentCorrelation] = useState<CorrelationType>('uncorrelated');
@@ -57,19 +79,23 @@ function App() {
 
   const currentDifficulty = staircase?.difficulty ?? 0;
 
-  const spawnProblem = useCallback((cfg: SessionConfig, sc: StaircaseState | null, bag: CorrelationBag | null) => {
-    const { params, bag: nextBag } = paramsForConfig(cfg, sc, bag);
-    setCorrelationBag(nextBag);
-    setCurrentCorrelation(params.correlation);
-    const solved = solveKnapsack(generateInstance(params, Math.floor(Math.random() * 2 ** 31)));
-    setInstance(solved);
-    setSelected(new Array(solved.weights.length).fill(false));
-    setTimedOut(false);
-    setPhase('playing');
-    setLastTrial(null);
-    startedAtRef.current = Date.now();
-    setTimeLeftMs(cfg.timeMode === 'timed' ? cfg.timeLimitSeconds * 1000 : null);
-  }, []);
+  const spawnProblem = useCallback(
+    (cfg: SessionConfig, sc: StaircaseState | null, bag: CorrelationBag | null, d2Bag: Dim2Bag | null) => {
+      const { params, bag: nextBag, dim2Bag: nextDim2Bag } = paramsForConfig(cfg, sc, bag, d2Bag);
+      setCorrelationBag(nextBag);
+      setDim2Bag(nextDim2Bag);
+      setCurrentCorrelation(params.correlation);
+      const solved = solveKnapsack(generateInstance(params, Math.floor(Math.random() * 2 ** 31)));
+      setInstance(solved);
+      setSelected(new Array(solved.weights.length).fill(false));
+      setTimedOut(false);
+      setPhase('playing');
+      setLastTrial(null);
+      startedAtRef.current = Date.now();
+      setTimeLeftMs(cfg.timeMode === 'timed' ? cfg.timeLimitSeconds * 1000 : null);
+    },
+    [],
+  );
 
   const startSession = useCallback(
     (cfg: SessionConfig) => {
@@ -79,8 +105,8 @@ function App() {
       setStaircase(sc);
       setRound(0);
       setTrials([]);
-      // Fresh bag each session — the shuffle only needs to hold within one run.
-      spawnProblem(cfg, sc, null);
+      // Fresh bags each session — the shuffle only needs to hold within one run.
+      spawnProblem(cfg, sc, null, null);
       setView('game');
     },
     [spawnProblem],
@@ -157,8 +183,8 @@ function App() {
       return;
     }
     setRound((r) => r + 1);
-    spawnProblem(config, staircase, correlationBag);
-  }, [round, config, staircase, correlationBag, spawnProblem]);
+    spawnProblem(config, staircase, correlationBag, dim2Bag);
+  }, [round, config, staircase, correlationBag, dim2Bag, spawnProblem]);
 
   return (
     <div className="app">

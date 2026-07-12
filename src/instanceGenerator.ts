@@ -52,6 +52,10 @@ export function difficultyToParams(difficulty: number): Omit<GenerationParams, '
     capacityRatio,
     correlationTightness,
     trap: trapParams(difficulty) ?? undefined,
+    // The dim2 config an unlocked round *would* use if drawn — advanced
+    // mode's "seed from difficulty" wants this unconditionally. Adaptive
+    // mode overrides it per round via drawDim2 instead of using it directly
+    // (see App.tsx), so dim2 doesn't dominate every round once unlocked.
     dim2: dim2Params(difficulty) ?? undefined,
   };
 }
@@ -176,6 +180,43 @@ export function dim2FromStrength(strength: number): GenerationParams['dim2'] {
 export function dim2StrengthOf(dim2: GenerationParams['dim2']): number {
   if (!dim2) return 0;
   return Math.max(0, Math.min(1, (0.85 - dim2.capRatio2) / (0.85 - 0.5)));
+}
+
+// Naively, once dim2 unlocks it could just apply to every round — but that
+// makes it the dominant mode rather than a special case to recognize, and
+// crowds out the correlation-regime switching that's the rest of this
+// engine's whole point. Held to a fixed 1-in-5 (20%) rate instead, via the
+// same shuffle-bag pattern as drawCorrelation (bounded worst-case gap of
+// ~9 rounds between dim2 rounds) rather than a flat 20% coin flip per round,
+// which could leave long droughts or unlucky streaks to chance the same way
+// pure-random correlation picking did before the correlation bag existed.
+const DIM2_ROUND_POOL: readonly boolean[] = [true, false, false, false, false];
+
+export interface Dim2Bag {
+  unlocked: boolean;
+  queue: boolean[];
+}
+
+export function drawDim2(
+  difficulty: number,
+  bag: Dim2Bag | null,
+  rng: () => number,
+): { dim2: GenerationParams['dim2']; bag: Dim2Bag } {
+  const unlocked = difficulty >= DIM2_START_DIFFICULTY;
+  if (!unlocked) {
+    return { dim2: undefined, bag: { unlocked: false, queue: [] } };
+  }
+
+  let queue = bag?.unlocked ? bag.queue : [];
+  if (queue.length === 0) {
+    queue = shuffle(DIM2_ROUND_POOL as boolean[], rng);
+  }
+
+  const [isDim2Round, ...rest] = queue;
+  return {
+    dim2: isDim2Round ? dim2Params(difficulty) : undefined,
+    bag: { unlocked: true, queue: rest },
+  };
 }
 
 // Correlation type is what actually forces a heuristic switch (a ratio/greedy
