@@ -4,6 +4,13 @@ export interface KnapsackInstance {
   weights: number[];
   values: number[];
   capacity: number;
+  // Second, independent capacity constraint (e.g. "volume" alongside
+  // "weight"). Undefined = the classic single-constraint 0/1 knapsack.
+  // A single value/weight ratio ranking a player has trained on a
+  // single-constraint instance stops being a valid heuristic once a second,
+  // independent constraint can also bind — see instanceGenerator.dim2Params.
+  weights2?: number[];
+  capacity2?: number;
 }
 
 export interface SolvedInstance extends KnapsackInstance {
@@ -44,6 +51,13 @@ export interface GenerationParams {
   // this is the mechanism that keeps giving skilled players further headroom
   // past that floor without relying on distributional luck.
   trap?: { decoyWasteFrac: number; marginFrac: number };
+  // Adds a second, independent capacity constraint — see
+  // instanceGenerator.dim2Params. A qualitatively different kind of hardness
+  // from tightness/trap: no single value/weight ratio can rank items once
+  // two constraints compete, which the operations-research and multi-attribute
+  // decision-making literature both treat as requiring different solution
+  // machinery, not just a harder version of the same one.
+  dim2?: { spread2: number; capRatio2: number };
 }
 
 // 'training' (fixed-difficulty, no auto-adjustment) was removed: advanced

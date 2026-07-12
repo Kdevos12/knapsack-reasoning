@@ -52,6 +52,7 @@ export function difficultyToParams(difficulty: number): Omit<GenerationParams, '
     capacityRatio,
     correlationTightness,
     trap: trapParams(difficulty) ?? undefined,
+    dim2: dim2Params(difficulty) ?? undefined,
   };
 }
 
@@ -134,6 +135,49 @@ function injectGreedyTrap(
   values[2] = v2;
 }
 
+// Tightness and the trap both keep the classic single-constraint 0/1
+// knapsack hard, but they're still one algorithmic axis: how informative a
+// value/weight ratio is. A second, independent capacity constraint (e.g.
+// "volume" alongside "weight") is a qualitatively different kind of hardness
+// — no single ratio can rank items once two constraints compete, which is
+// documented to require different solution machinery (Lagrangian/surrogate
+// relaxation, not plain 1D DP) and engages a documented multi-attribute
+// integration process in human decision-making, distinct from single-value
+// comparison. Measured: a naive "rank by dimension-1 ratio only" strategy
+// (the trained 1D heuristic) drops from ~50% success at unlock down to 2-4%
+// by difficulty ~1000 and holds there.
+//
+// The exact 2D DP is O(n * capacity1 * capacity2) in both time AND memory
+// (it keeps the full table to backtrack the optimal selection — see
+// knapsackSolver.solveKnapsack2D), so dimension 1's otherwise-uncapped
+// spread is clamped whenever dim2 is active: without this, an elite-tier
+// player's spread (already in the hundreds by difficulty ~50,000) would
+// blow the DP table up to tens of millions of cells.
+const DIM2_START_DIFFICULTY = 250;
+const DIM2_GROWTH_RATE = 400;
+export const MAX_SPREAD_WITH_DIM2 = SAFETY_BOUNDS.weightMax;
+
+function dim2Params(difficulty: number): GenerationParams['dim2'] {
+  if (difficulty < DIM2_START_DIFFICULTY) return undefined;
+  const t2 = Math.min(1, (difficulty - DIM2_START_DIFFICULTY) / DIM2_GROWTH_RATE);
+  return dim2FromStrength(t2);
+}
+
+// Manual-mode equivalent, mirroring trapFromStrength/trapStrengthOf: reuses
+// the same 8-35 spread2 / 0.85-0.5 capRatio2 curve dim2Params sweeps through
+// difficulty, so seeding from a difficulty and hand-tuning afterward
+// round-trip consistently.
+export function dim2FromStrength(strength: number): GenerationParams['dim2'] {
+  const s = Math.max(0, Math.min(1, strength));
+  if (s <= 0) return undefined;
+  return { spread2: Math.round(lerp(8, 35, s)), capRatio2: lerp(0.85, 0.5, s) };
+}
+
+export function dim2StrengthOf(dim2: GenerationParams['dim2']): number {
+  if (!dim2) return 0;
+  return Math.max(0, Math.min(1, (0.85 - dim2.capRatio2) / (0.85 - 0.5)));
+}
+
 // Correlation type is what actually forces a heuristic switch (a ratio/greedy
 // strategy that works when weight and value are independent breaks down once
 // they're tied together), so it must not collapse to a single fixed value
@@ -193,7 +237,18 @@ export function drawCorrelation(
 
 export function generateInstance(params: GenerationParams, seed: number = Date.now()): KnapsackInstance {
   const rng = mulberry32(seed);
-  const { nItems, weightRange, valueRange, capacityRatio, correlation, correlationTightness = 0 } = params;
+  const { nItems, capacityRatio, correlation, correlationTightness = 0, dim2 } = params;
+
+  // See MAX_SPREAD_WITH_DIM2: dimension 1 is clamped to a bounded, fixed
+  // range whenever a second constraint is active so the 2D DP table can't
+  // grow past a few million cells regardless of how high difficulty (and
+  // the otherwise-uncapped spread) has climbed.
+  const weightRange: [number, number] = dim2
+    ? [params.weightRange[0], Math.min(params.weightRange[1], MAX_SPREAD_WITH_DIM2)]
+    : params.weightRange;
+  const valueRange: [number, number] = dim2
+    ? [params.valueRange[0], Math.min(params.valueRange[1], MAX_SPREAD_WITH_DIM2)]
+    : params.valueRange;
 
   const weights = Array.from({ length: nItems }, () => randInt(rng, weightRange[0], weightRange[1]));
   const [vMin, vMax] = valueRange;
@@ -232,8 +287,27 @@ export function generateInstance(params: GenerationParams, seed: number = Date.n
   const totalWeight = weights.reduce((s, w) => s + w, 0);
   const capacity = Math.max(weightRange[0], Math.round(totalWeight * capacityRatio));
 
-  if (params.trap) {
-    injectGreedyTrap(weights, values, capacity, params.trap, rng);
+  // Trap and dim2 are two different mechanisms for defeating the same
+  // trained "rank by ratio" heuristic and were measured to interfere badly
+  // when combined on the same instance (the trap's decoy/combo weights are
+  // tuned against a single capacity and can accidentally violate or dodge
+  // the second one, producing an unpredictable — and once measured,
+  // anomalously *easier* — result). Once both are unlocked, each round uses
+  // exactly one, chosen by a coin flip from the same seeded rng so it's
+  // still reproducible from a given seed.
+  const useTrap = params.trap && (!dim2 || rng() < 0.5);
+  if (useTrap) {
+    injectGreedyTrap(weights, values, capacity, params.trap!, rng);
+  }
+
+  if (dim2 && !useTrap) {
+    // Independent of weight/value on purpose: it's a genuinely separate
+    // constraint to juggle, not more noise on the same axis the player has
+    // already learned to read via tile size/color.
+    const weights2 = Array.from({ length: nItems }, () => randInt(rng, 1, dim2.spread2));
+    const totalWeight2 = weights2.reduce((s, w) => s + w, 0);
+    const capacity2 = Math.max(1, Math.round(totalWeight2 * dim2.capRatio2));
+    return { weights, values, capacity, weights2, capacity2 };
   }
 
   return { weights, values, capacity };
