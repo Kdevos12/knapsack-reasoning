@@ -21,7 +21,8 @@ function Tutorial() {
           <li><strong>Bigger square = heavier item.</strong> Size mirrors weight, so bulk is visible at a glance.</li>
           <li><strong>Deeper blue = more valuable item.</strong> Colour intensity mirrors value.</li>
           <li>The exact numbers are always shown: <strong>v:</strong> value (large) and <strong>w:</strong> weight (small pill).</li>
-          <li>Selected items turn <strong>green</strong>. The weight gauge in the header turns red if you exceed capacity.</li>
+          <li>At high difficulty a tile may also show a <strong>vol:</strong> pill — a second, independent capacity you must respect alongside weight (see "Second dimension" below).</li>
+          <li>Selected items turn <strong>green</strong>. The weight (and volume, if present) gauge in the header turns red if you exceed its capacity.</li>
         </ul>
       </section>
 
@@ -72,9 +73,29 @@ function Tutorial() {
             <ul>
               <li><strong>Uncorrelated</strong> — value and weight are independent. Bargains (light + valuable) stand out, so greedy picking works well.</li>
               <li><strong>Weakly correlated</strong> — value roughly tracks weight with some noise. Fewer obvious bargains.</li>
-              <li><strong>Strongly correlated</strong> — value is weight plus a constant. Every item has a similar ratio, so the greedy shortcut stops discriminating and you must think in combinations.</li>
-              <li><strong>Subset sum</strong> — value equals weight. Ratios are all identical; the task reduces to filling the capacity exactly, a pure combinatorial puzzle.</li>
+              <li><strong>Strongly correlated</strong> — value is weight plus a near-constant offset. Every item has a similar ratio, so the greedy shortcut stops discriminating and you must think in combinations.</li>
+              <li><strong>Subset sum</strong> — the tightest version of that offset. Ratios are nearly tied; the task collapses toward filling the capacity as exactly as possible.</li>
             </ul>
+          </dd>
+
+          <dt>Correlation tightness</dt>
+          <dd>
+            How close weakly/strongly/subset-sum's offset gets to zero. Higher tightness makes the value/weight ratio
+            less and less useful for ranking items, without changing which correlation type is selected above.
+          </dd>
+
+          <dt>Greedy trap</dt>
+          <dd>
+            Deliberately plants one item with the best ratio in the round that wastes some capacity, versus a
+            combination of two other items with a slightly lower ratio that fills the capacity exactly for more total
+            value. Taking the best-ratio item first — the natural instinct — is provably wrong whenever this is active.
+          </dd>
+
+          <dt>Second dimension / volume</dt>
+          <dd>
+            Adds an independent second capacity (shown as a <strong>vol:</strong> pill and a second gauge). No single
+            value/weight ratio can rank items once two constraints compete — the option that's most efficient for
+            weight may be the worst for volume, so you have to weigh both at once instead of sorting by one number.
           </dd>
 
           <dt>Time limit</dt>
