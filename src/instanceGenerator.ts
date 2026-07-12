@@ -147,9 +147,15 @@ function injectGreedyTrap(
 // documented to require different solution machinery (Lagrangian/surrogate
 // relaxation, not plain 1D DP) and engages a documented multi-attribute
 // integration process in human decision-making, distinct from single-value
-// comparison. Measured: a naive "rank by dimension-1 ratio only" strategy
-// (the trained 1D heuristic) drops from ~50% success at unlock down to 2-4%
-// within a few hundred difficulty points and holds there.
+// comparison. Value depends on both dimensions jointly (see
+// jointValuesForDim2) specifically so this holds against more than one
+// naive strategy: measured against rank-by-dimension-1-ratio,
+// rank-by-dimension-2-ratio, rank-by-combined-ratio, rank-by-bottleneck-
+// ratio, and rank-by-raw-value-ignoring-weight, all five stay under ~45%
+// success within a few hundred difficulty points of unlock and hold there
+// (an earlier version made weight2 fully independent of value, which left
+// dimension-2/combined/bottleneck ratios climbing to 85-98% success even
+// though dimension-1-ratio alone stayed hard).
 //
 // The exact 2D DP is O(n * capacity1 * capacity2) in both time AND memory
 // (it keeps the full table to backtrack the optimal selection — see
@@ -185,12 +191,13 @@ export function dim2StrengthOf(dim2: GenerationParams['dim2']): number {
 // Naively, once dim2 unlocks it could just apply to every round — but that
 // makes it the dominant mode rather than a special case to recognize, and
 // crowds out the correlation-regime switching that's the rest of this
-// engine's whole point. Held to a fixed 1-in-5 (20%) rate instead, via the
+// engine's whole point. Held to a fixed 1-in-10 (10%) rate instead, via the
 // same shuffle-bag pattern as drawCorrelation (bounded worst-case gap of
-// ~9 rounds between dim2 rounds) rather than a flat 20% coin flip per round,
-// which could leave long droughts or unlucky streaks to chance the same way
-// pure-random correlation picking did before the correlation bag existed.
-const DIM2_ROUND_POOL: readonly boolean[] = [true, false, false, false, false];
+// ~19 rounds between dim2 rounds) rather than a flat 10% coin flip per
+// round, which could leave long droughts or unlucky streaks to chance the
+// same way pure-random correlation picking did before the correlation bag
+// existed.
+const DIM2_ROUND_POOL: readonly boolean[] = [true, false, false, false, false, false, false, false, false, false];
 
 export interface Dim2Bag {
   unlocked: boolean;
@@ -276,6 +283,45 @@ export function drawCorrelation(
   return { correlation, bag: { pool, queue: rest, lastDrawn: correlation } };
 }
 
+// Value depends on *both* weight dimensions jointly (see generateInstance),
+// clamped into dimension 1's own range the same way the single-constraint
+// correlation types clamp value into weightRange. Two things were measured
+// necessary here, not just "make weight2 independent":
+// - If value only depended on weight1 (weight2 fully independent noise, the
+//   first version of this feature), weight2 behaved like the *uncorrelated*
+//   regime — easy for a ratio heuristic — so "rank by dimension-2 ratio" or
+//   "rank by a combined/bottleneck ratio" climbed to 85-98% success even
+//   while "rank by dimension-1 ratio" (the only one originally tested)
+//   stayed hard. Tying value to a joint w1+w2 quantity instead means no
+//   single dimension's ratio, nor a fixed linear combination, reliably
+//   ranks items — the right combination depends on which capacity binds,
+//   which varies per instance.
+// - Without the clamp, value scales with total size roughly unboundedly, so
+//   "rank by raw value, ignore weight entirely" alone reached 85%+ (this
+//   heuristic stays under ~45% for the equivalent single-constraint
+//   correlation types, which clamp for the same reason).
+//
+// DIM2_VALUE_SCALE: naively normalizing weight2's contribution to exactly
+// match weight1's range (scale = 1) leaves "rank by combined ratio
+// value/(w1+w2)" exploitable (~55-58% success, holding regardless of
+// difficulty) — because value ends up close to a 1:1 mix of w1 and w2, so
+// value/(w1+w2) is nearly constant across items, which (like any
+// near-degenerate ratio) lets a naive fill land close to optimal by
+// combinatorics rather than ranking. Deliberately under-weighting weight2's
+// contribution breaks that near-tie; measured across dim1/dim2/combined/
+// bottleneck/raw-value ratios and both low (just-unlocked, small spread2)
+// and high difficulty, 0.6 keeps all five under ~30% success.
+const DIM2_VALUE_SCALE = 0.6;
+
+function jointValuesForDim2(weights1: number[], weights2: number[], spread1: number, spread2: number, tightness: number): number[] {
+  const offsetFrac = lerp(0.15, 0.03, tightness);
+  return weights1.map((w1, i) => {
+    const base = w1 + weights2[i] * (spread1 / spread2) * DIM2_VALUE_SCALE;
+    const offset = Math.max(1, Math.round(base * offsetFrac));
+    return Math.max(1, Math.min(spread1, Math.round(base + offset)));
+  });
+}
+
 export function generateInstance(params: GenerationParams, seed: number = Date.now()): KnapsackInstance {
   const rng = mulberry32(seed);
   const { nItems, capacityRatio, correlation, correlationTightness = 0, dim2 } = params;
@@ -295,59 +341,66 @@ export function generateInstance(params: GenerationParams, seed: number = Date.n
   const [vMin, vMax] = valueRange;
   const span = vMax - vMin;
 
-  const values = weights.map((w) => {
-    switch (correlation) {
-      case 'uncorrelated':
-        return randInt(rng, vMin, vMax);
-      case 'weakly_correlated': {
-        const jitter = Math.max(1, Math.round(span * lerp(0.2, 0.06, correlationTightness)));
-        return Math.max(vMin, Math.min(vMax, w + randInt(rng, -jitter, jitter)));
-      }
-      case 'strongly_correlated': {
-        const offset = Math.max(1, Math.round(span * lerp(0.1, 0.04, correlationTightness)));
-        return Math.max(vMin, Math.min(vMax, w + offset));
-      }
-      case 'subset_sum': {
-        // Not literal value = weight: random subset-sum instances are
-        // provably easy on average (Borgs et al.; "almost all subset sum
-        // problems are easy") — measured here to be *more* greedy-solvable
-        // than strongly_correlated once nItems grows, because a dead ratio
-        // tie lets a naive fill land near-optimal by sheer combinatorics.
-        // A small but tighter-than-strongly_correlated offset keeps ratios
-        // distinguishable-but-nearly-tied, which is what actually resists a
-        // ratio-sort heuristic — measured to hold up across the full
-        // difficulty range instead of washing out.
-        const offset = Math.max(1, Math.round(span * lerp(0.05, 0.005, correlationTightness)));
-        return Math.max(vMin, Math.min(vMax, w + offset));
-      }
-      default:
-        return randInt(rng, vMin, vMax);
-    }
-  });
-
-  const totalWeight = weights.reduce((s, w) => s + w, 0);
-  const capacity = Math.max(weightRange[0], Math.round(totalWeight * capacityRatio));
-
   // Trap and dim2 are two different mechanisms for defeating the same
   // trained "rank by ratio" heuristic and were measured to interfere badly
   // when combined on the same instance (the trap's decoy/combo weights are
   // tuned against a single capacity and can accidentally violate or dodge
   // the second one, producing an unpredictable — and once measured,
-  // anomalously *easier* — result). Once both are unlocked, each round uses
-  // exactly one, chosen by a coin flip from the same seeded rng so it's
-  // still reproducible from a given seed.
-  const useTrap = params.trap && (!dim2 || rng() < 0.5);
+  // anomalously *easier* — result). App.tsx's drawDim2 already keeps them
+  // mutually exclusive for adaptive mode; this coin flip is the remaining
+  // safeguard for advanced mode, where a player can set both sliders by
+  // hand.
+  const useTrap = !!params.trap && (!dim2 || rng() < 0.5);
+  const useDim2 = !!dim2 && !useTrap;
+
+  let values: number[];
+  let weights2: number[] | undefined;
+
+  if (useDim2) {
+    weights2 = Array.from({ length: nItems }, () => randInt(rng, 1, dim2!.spread2));
+    values = jointValuesForDim2(weights, weights2, weightRange[1], dim2!.spread2, correlationTightness);
+  } else {
+    values = weights.map((w) => {
+      switch (correlation) {
+        case 'uncorrelated':
+          return randInt(rng, vMin, vMax);
+        case 'weakly_correlated': {
+          const jitter = Math.max(1, Math.round(span * lerp(0.2, 0.06, correlationTightness)));
+          return Math.max(vMin, Math.min(vMax, w + randInt(rng, -jitter, jitter)));
+        }
+        case 'strongly_correlated': {
+          const offset = Math.max(1, Math.round(span * lerp(0.1, 0.04, correlationTightness)));
+          return Math.max(vMin, Math.min(vMax, w + offset));
+        }
+        case 'subset_sum': {
+          // Not literal value = weight: random subset-sum instances are
+          // provably easy on average (Borgs et al.; "almost all subset sum
+          // problems are easy") — measured here to be *more* greedy-solvable
+          // than strongly_correlated once nItems grows, because a dead ratio
+          // tie lets a naive fill land near-optimal by sheer combinatorics.
+          // A small but tighter-than-strongly_correlated offset keeps ratios
+          // distinguishable-but-nearly-tied, which is what actually resists a
+          // ratio-sort heuristic — measured to hold up across the full
+          // difficulty range instead of washing out.
+          const offset = Math.max(1, Math.round(span * lerp(0.05, 0.005, correlationTightness)));
+          return Math.max(vMin, Math.min(vMax, w + offset));
+        }
+        default:
+          return randInt(rng, vMin, vMax);
+      }
+    });
+  }
+
+  const totalWeight = weights.reduce((s, w) => s + w, 0);
+  const capacity = Math.max(weightRange[0], Math.round(totalWeight * capacityRatio));
+
   if (useTrap) {
     injectGreedyTrap(weights, values, capacity, params.trap!, rng);
   }
 
-  if (dim2 && !useTrap) {
-    // Independent of weight/value on purpose: it's a genuinely separate
-    // constraint to juggle, not more noise on the same axis the player has
-    // already learned to read via tile size/color.
-    const weights2 = Array.from({ length: nItems }, () => randInt(rng, 1, dim2.spread2));
-    const totalWeight2 = weights2.reduce((s, w) => s + w, 0);
-    const capacity2 = Math.max(1, Math.round(totalWeight2 * dim2.capRatio2));
+  if (useDim2) {
+    const totalWeight2 = weights2!.reduce((s, w) => s + w, 0);
+    const capacity2 = Math.max(1, Math.round(totalWeight2 * dim2!.capRatio2));
     return { weights, values, capacity, weights2, capacity2 };
   }
 
