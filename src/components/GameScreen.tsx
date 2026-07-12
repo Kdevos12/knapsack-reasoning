@@ -42,7 +42,11 @@ function GameScreen({
 }: GameScreenProps) {
   const totalWeight = selected.reduce((s, on, i) => (on ? s + instance.weights[i] : s), 0);
   const totalValue = selected.reduce((s, on, i) => (on ? s + instance.values[i] : s), 0);
-  const overCapacity = totalWeight > instance.capacity;
+  const hasDim2 = instance.weights2 !== undefined && instance.capacity2 !== undefined;
+  const totalWeight2 = hasDim2
+    ? selected.reduce((s, on, i) => (on ? s + instance.weights2![i] : s), 0)
+    : 0;
+  const overCapacity = totalWeight > instance.capacity || (hasDim2 && totalWeight2 > instance.capacity2!);
 
   const minW = Math.min(...instance.weights);
   const maxW = Math.max(...instance.weights);
@@ -85,11 +89,24 @@ function GameScreen({
             </span>
             <div className="gauge">
               <div
-                className={`gauge-fill${overCapacity ? ' over' : ''}`}
+                className={`gauge-fill${totalWeight > instance.capacity ? ' over' : ''}`}
                 style={{ width: `${Math.min(100, (totalWeight / instance.capacity) * 100)}%` }}
               />
             </div>
           </div>
+          {hasDim2 && (
+            <div className="stat-block">
+              <span className="stat-label">
+                Volume {totalWeight2}/{instance.capacity2}
+              </span>
+              <div className="gauge">
+                <div
+                  className={`gauge-fill${totalWeight2 > instance.capacity2! ? ' over' : ''}`}
+                  style={{ width: `${Math.min(100, (totalWeight2 / instance.capacity2!) * 100)}%` }}
+                />
+              </div>
+            </div>
+          )}
           <div className="stat-block">
             <span className="stat-label">Value</span>
             <span className="value-badge">
@@ -108,6 +125,7 @@ function GameScreen({
       <div className="game-board">
         {instance.weights.map((w, i) => {
           const v = instance.values[i];
+          const w2 = instance.weights2?.[i];
           const size = 52 + ((w - minW) / (maxW - minW || 1)) * 68; // 52-120px
           const intensity = Math.round(60 + ((v - minV) / (maxV - minV || 1)) * 160); // 60-220
           // Past ~130 the blue is dark enough that dark text stops being readable.
@@ -128,7 +146,7 @@ function GameScreen({
                 backgroundColor: isSelected ? '#2f9e44' : `rgb(${255 - intensity}, ${255 - intensity}, 255)`,
               }}
               onClick={() => handleClick(i)}
-              title={`Value ${v} · Weight ${w}`}
+              title={w2 !== undefined ? `Value ${v} · Weight ${w} · Volume ${w2}` : `Value ${v} · Weight ${w}`}
             >
               <span className="tile-value" style={{ fontSize: `${Math.max(0.9, (size / 120) * 1.7)}rem` }}>
                 <span className="tile-prefix">v:</span>
@@ -138,6 +156,12 @@ function GameScreen({
                 <span className="tile-prefix">w:</span>
                 {w}
               </span>
+              {w2 !== undefined && (
+                <span className="tile-weight">
+                  <span className="tile-prefix">vol:</span>
+                  {w2}
+                </span>
+              )}
             </button>
           );
         })}
@@ -145,9 +169,14 @@ function GameScreen({
 
       <div className="board-legend">
         Bigger square = heavier · Deeper blue = more valuable
+        {hasDim2 && ' · vol: pill is the second, independent capacity constraint'}
       </div>
 
-      {overCapacity && !feedback && <div className="capacity-warning">Over capacity — remove some items.</div>}
+      {overCapacity && !feedback && (
+        <div className="capacity-warning">
+          {hasDim2 ? 'Over weight or volume capacity — remove some items.' : 'Over capacity — remove some items.'}
+        </div>
+      )}
       {timedOut && !feedback && <div className="time-up-overlay">Time's up — submit your solution.</div>}
 
       {feedback && (

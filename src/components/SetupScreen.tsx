@@ -2,7 +2,14 @@ import { useState } from 'react';
 import type { CorrelationType, SessionConfig, SessionMode, TimeMode } from '../types';
 import { DEFAULT_ADVANCED_PARAMS } from '../types';
 import { loadSavedDifficulty } from '../adaptiveEngine';
-import { difficultyToParams, trapFromStrength, trapStrengthOf, unlockedCorrelations } from '../instanceGenerator';
+import {
+  difficultyToParams,
+  dim2FromStrength,
+  dim2StrengthOf,
+  trapFromStrength,
+  trapStrengthOf,
+  unlockedCorrelations,
+} from '../instanceGenerator';
 import './SetupScreen.css';
 
 interface SetupScreenProps {
@@ -189,9 +196,22 @@ function SetupScreen({ initialConfig, onStart }: SetupScreenProps) {
               }
             />
           </div>
+          <div className="setting-row">
+            <label>Second dimension / volume ({Math.round(dim2StrengthOf(config.advancedParams.dim2) * 100)}%)</label>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={Math.round(dim2StrengthOf(config.advancedParams.dim2) * 100)}
+              onChange={(e) =>
+                set('advancedParams', { ...config.advancedParams, dim2: dim2FromStrength(Number(e.target.value) / 100) })
+              }
+            />
+          </div>
           <p className="help-text">
-            Tightness and greedy trap are the two levers that keep a naive value/weight-ratio strategy from working —
-            adaptive mode drives both automatically from a single difficulty number.
+            Tightness and greedy trap keep a naive value/weight-ratio strategy from working on a single constraint;
+            the second dimension adds a genuinely independent capacity (e.g. volume) so no single ratio can rank
+            items at all — adaptive mode drives all three automatically from one difficulty number.
           </p>
           <button type="button" className="reset-button" onClick={() => set('advancedParams', DEFAULT_ADVANCED_PARAMS)}>
             Reset these parameters

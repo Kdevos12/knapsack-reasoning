@@ -119,7 +119,11 @@ function App() {
     if (!instance || phase !== 'playing') return;
     const totalWeight = selected.reduce((s, on, i) => (on ? s + instance.weights[i] : s), 0);
     const totalValue = selected.reduce((s, on, i) => (on ? s + instance.values[i] : s), 0);
-    const withinCapacity = totalWeight <= instance.capacity;
+    const totalWeight2 = instance.weights2
+      ? selected.reduce((s, on, i) => (on ? s + instance.weights2![i] : s), 0)
+      : 0;
+    const withinCapacity =
+      totalWeight <= instance.capacity && (instance.capacity2 === undefined || totalWeight2 <= instance.capacity2);
     const qualityRatio = withinCapacity && instance.optimalValue > 0 ? totalValue / instance.optimalValue : 0;
     const success = withinCapacity && qualityRatio >= SUCCESS_QUALITY_THRESHOLD;
     const timeUsedMs = Date.now() - startedAtRef.current;
