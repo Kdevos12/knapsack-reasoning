@@ -38,6 +38,12 @@ export interface GenerationParams {
   // omitted — only training/adaptive modes (via difficultyToParams) drive it
   // above 0; advanced mode's manual params are unaffected.
   correlationTightness?: number;
+  // A deterministic (not statistical) greedy-defeating construction — see
+  // instanceGenerator.injectGreedyTrap. Correlation-tightness alone plateaus
+  // around a ~45-55% greedy success floor no matter how tight (measured);
+  // this is the mechanism that keeps giving skilled players further headroom
+  // past that floor without relying on distributional luck.
+  trap?: { decoyWasteFrac: number; marginFrac: number };
 }
 
 export type SessionMode = 'training' | 'advanced' | 'adaptive';

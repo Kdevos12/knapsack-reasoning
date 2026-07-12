@@ -51,7 +51,71 @@ export function difficultyToParams(difficulty: number): Omit<GenerationParams, '
     valueRange: [1, spread],
     capacityRatio,
     correlationTightness,
+    trap: trapParams(difficulty) ?? undefined,
   };
+}
+
+// Correlation-tightness (above) has an intrinsic ceiling: measured across a
+// fine offsetFrac sweep, greedy's failure rate plateaus around 45-55% no
+// matter how close the offset gets to 0 (0 itself is the degenerate
+// subset-sum tie, which is *easier*, not harder — see subset_sum above). For
+// players who blow past that ceiling (elite-tail users, per the design
+// brief), further difficulty comes from a deterministic construction instead
+// of a statistical one: the textbook proof that greedy fails 0/1 knapsack.
+// Pick a "decoy" item at the best ratio in the instance whose weight wastes
+// `decoyWasteFrac` of capacity (so nothing else fits alongside it), versus a
+// 2-item "trap" combination that tiles the capacity exactly at a slightly
+// lower ratio but a strictly higher guaranteed total value. Greedy always
+// takes the decoy (best ratio); the true optimum always takes the trap.
+// decoyWasteFrac is fixed (not grown) — it must stay safely below the trap
+// split's ~45% floor or the trap item can start fitting back into the
+// decoy's leftover space, which was measured to make instances *easier*
+// again past difficulty ~10000 (the opposite of intended). marginFrac
+// (< decoyWasteFrac, enforced) is what grows, asymptotically approaching but
+// never reaching decoyWasteFrac, so this keeps intensifying indefinitely —
+// measured stable (no reversal) out to difficulty 500,000+.
+const TRAP_START_DIFFICULTY = 350;
+const TRAP_DECOY_WASTE_FRAC = 0.2;
+const TRAP_GROWTH_RATE = 400;
+
+function trapParams(difficulty: number): { decoyWasteFrac: number; marginFrac: number } | null {
+  if (difficulty < TRAP_START_DIFFICULTY) return null;
+  const x = (difficulty - TRAP_START_DIFFICULTY) / TRAP_GROWTH_RATE;
+  const growth = x / (1 + x); // asymptotic: -> 1 as difficulty -> infinity, never reaches it
+  const marginFrac = TRAP_DECOY_WASTE_FRAC * (0.15 + 0.82 * growth);
+  return { decoyWasteFrac: TRAP_DECOY_WASTE_FRAC, marginFrac };
+}
+
+// Overwrites 3 items in place with the decoy + 2-item trap combination
+// described above. Layered on top of whichever correlation already
+// generated the rest of the instance — orthogonal to correlation type, so it
+// composes with all four rather than being a fifth type of its own.
+function injectGreedyTrap(
+  weights: number[],
+  values: number[],
+  capacity: number,
+  trap: { decoyWasteFrac: number; marginFrac: number },
+  rng: () => number,
+): void {
+  if (weights.length < 3) return;
+
+  const bestRatio = Math.max(...weights.map((w, i) => values[i] / w));
+  const split = 0.45 + rng() * 0.1; // 45-55%: both trap items comfortably exceed the decoy's leftover slack
+  const w1 = Math.max(1, Math.round(capacity * split));
+  const w2 = Math.max(1, capacity - w1);
+  const v1 = Math.max(1, Math.round(w1 * bestRatio));
+  const v2 = Math.max(1, Math.round(w2 * bestRatio));
+  const trapValue = v1 + v2;
+
+  const decoyWeight = Math.max(1, Math.round(capacity * (1 - trap.decoyWasteFrac)));
+  const decoyValue = Math.max(1, Math.round(trapValue * (1 - trap.marginFrac)));
+
+  weights[0] = decoyWeight;
+  values[0] = decoyValue;
+  weights[1] = w1;
+  values[1] = v1;
+  weights[2] = w2;
+  values[2] = v2;
 }
 
 // Correlation type is what actually forces a heuristic switch (a ratio/greedy
@@ -151,6 +215,10 @@ export function generateInstance(params: GenerationParams, seed: number = Date.n
 
   const totalWeight = weights.reduce((s, w) => s + w, 0);
   const capacity = Math.max(weightRange[0], Math.round(totalWeight * capacityRatio));
+
+  if (params.trap) {
+    injectGreedyTrap(weights, values, capacity, params.trap, rng);
+  }
 
   return { weights, values, capacity };
 }
