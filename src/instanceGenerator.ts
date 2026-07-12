@@ -170,22 +170,44 @@ export const MAX_SPREAD_WITH_DIM2 = SAFETY_BOUNDS.weightMax;
 function dim2Params(difficulty: number): GenerationParams['dim2'] {
   if (difficulty < DIM2_START_DIFFICULTY) return undefined;
   const t2 = Math.min(1, (difficulty - DIM2_START_DIFFICULTY) / DIM2_GROWTH_RATE);
-  return dim2FromStrength(t2);
+  // Not dim2FromStrength(t2): its `strength <= 0` guard means "manually
+  // dialed to 0% = off" in advanced mode, but here t2 === 0 means "just
+  // unlocked", which must still produce the loosest active config, not
+  // undefined — otherwise a round the bag drew as a dim2 round silently
+  // becomes a mono-constraint round at exactly difficulty 75, wasting that
+  // slot (harmless in practice since difficulty is rarely exactly 75, but
+  // it also made naive test harnesses that force-draw a dim2 round loop
+  // forever at that exact value).
+  return { spread2: Math.round(lerp(20, 35, t2)), capRatio2: lerp(0.7, 0.5, t2) };
 }
 
 // Manual-mode equivalent, mirroring trapFromStrength/trapStrengthOf: reuses
-// the same 8-35 spread2 / 0.85-0.5 capRatio2 curve dim2Params sweeps through
-// difficulty, so seeding from a difficulty and hand-tuning afterward
-// round-trip consistently.
+// the same 20-35 spread2 / 0.70-0.5 capRatio2 curve dim2Params sweeps
+// through difficulty, so seeding from a difficulty and hand-tuning
+// afterward round-trip consistently.
+//
+// The starting point (20/0.70, not the initially-shipped 8/0.85) is
+// calibrated, not arbitrary: at difficulty 75 (unlock), correlationTightness
+// is already 0.19 (it's been ramping since difficulty 0), so the
+// single-constraint regime a player is used to is already at ~33% success
+// for a ratio-greedy strategy (strongly_correlated, measured) — not the
+// loose, easy shape a difficulty-0 instance would have. dim2's own
+// tightening curve restarted from t=0 at unlock, so its *first* dim2 round
+// landed far weaker (66-86% success on several heuristics) than the
+// single-constraint rounds right next to it in the same session, instead of
+// the two axes feeling continuous. 20/0.70 measured at ~34% average success
+// across dim1/dim2/combined/bottleneck/raw-value ratios at difficulty 75,
+// matching the single-constraint baseline instead of lagging behind it
+// until difficulty ~1000 (which most players will never reach).
 export function dim2FromStrength(strength: number): GenerationParams['dim2'] {
   const s = Math.max(0, Math.min(1, strength));
   if (s <= 0) return undefined;
-  return { spread2: Math.round(lerp(8, 35, s)), capRatio2: lerp(0.85, 0.5, s) };
+  return { spread2: Math.round(lerp(20, 35, s)), capRatio2: lerp(0.7, 0.5, s) };
 }
 
 export function dim2StrengthOf(dim2: GenerationParams['dim2']): number {
   if (!dim2) return 0;
-  return Math.max(0, Math.min(1, (0.85 - dim2.capRatio2) / (0.85 - 0.5)));
+  return Math.max(0, Math.min(1, (0.7 - dim2.capRatio2) / (0.7 - 0.5)));
 }
 
 // Naively, once dim2 unlocks it could just apply to every round — but that
