@@ -8,11 +8,21 @@ function lerp(min: number, max: number, t: number): number {
 
 // Deterministic difficulty -> generation params mapping. One monotonic table,
 // no search/optimization loop: the item count, ranges and correlation type
-// scale directly with the requested difficulty scalar (0-100).
+// scale directly with the requested difficulty scalar. 0-100 is the tuned
+// "core" range (item count, spread and correlation tier all ramp up together
+// to reach the hardest subset_sum/phase-transition regime at 100). There is
+// no ceiling above that: the adaptive staircase can push difficulty past 100
+// indefinitely, so item count and spread keep growing (sqrt-scaled, so the
+// exact DP solver stays fast) instead of freezing every instance at its
+// difficulty-100 shape forever.
 export function difficultyToParams(difficulty: number): GenerationParams {
-  const t = difficulty / 100;
-  const nItems = Math.round(lerp(SAFETY_BOUNDS.nItemsMin, SAFETY_BOUNDS.nItemsMax, t));
-  const spread = Math.round(lerp(12, SAFETY_BOUNDS.weightMax, t));
+  const t = Math.min(1, difficulty / 100);
+  const over = Math.max(0, difficulty - 100);
+  const extraItems = Math.floor(Math.sqrt(over));
+  const extraSpread = Math.round(Math.sqrt(over) * 4);
+
+  const nItems = Math.round(lerp(SAFETY_BOUNDS.nItemsMin, SAFETY_BOUNDS.nItemsMax, t)) + extraItems;
+  const spread = Math.round(lerp(12, SAFETY_BOUNDS.weightMax, t)) + extraSpread;
 
   let correlation: CorrelationType;
   if (t < 0.3) correlation = 'uncorrelated';

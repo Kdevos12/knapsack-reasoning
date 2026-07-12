@@ -50,7 +50,11 @@ export interface Trial {
 
 export const SAFETY_BOUNDS = {
   minDifficulty: 0,
-  maxDifficulty: 100,
+  // No upper bound: the adaptive staircase (adaptiveEngine.ts) is only
+  // floor-clamped so skilled players keep climbing instead of pinning at a
+  // ceiling. 100 remains the tuned "full difficulty" reference point that
+  // instanceGenerator.ts scales tiers against, and the manual training slider
+  // still stops there since that's an explicit user choice, not the staircase.
   nItemsMin: 4,
   nItemsMax: 14,
   capacityRatioMin: 0.4,

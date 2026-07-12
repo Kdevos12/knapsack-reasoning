@@ -81,5 +81,5 @@ function move(state: StaircaseState, direction: 'up' | 'down'): StaircaseState {
 }
 
 function clampDifficulty(d: number): number {
-  return Math.max(SAFETY_BOUNDS.minDifficulty, Math.min(SAFETY_BOUNDS.maxDifficulty, d));
+  return Math.max(SAFETY_BOUNDS.minDifficulty, d);
 }
