@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { CorrelationType, SessionConfig, SessionMode, TimeMode } from '../types';
 import { DEFAULT_ADVANCED_PARAMS } from '../types';
 import { loadSavedDifficulty } from '../adaptiveEngine';
+import { difficultyToParams, trapFromStrength, trapStrengthOf, unlockedCorrelations } from '../instanceGenerator';
 import './SetupScreen.css';
 
 interface SetupScreenProps {
@@ -18,10 +19,22 @@ const CORRELATIONS: { value: CorrelationType; label: string }[] = [
 
 function SetupScreen({ initialConfig, onStart }: SetupScreenProps) {
   const [config, setConfig] = useState<SessionConfig>(initialConfig);
+  const [seedDifficulty, setSeedDifficulty] = useState(100);
   const savedLevel = loadSavedDifficulty();
 
   const set = <K extends keyof SessionConfig>(key: K, value: SessionConfig[K]) =>
     setConfig((prev) => ({ ...prev, [key]: value }));
+
+  // Reuses the exact same formulas the adaptive/training engine runs at this
+  // difficulty (item count, spread, capacity ratio, correlation tightness,
+  // greedy-trap strength), picking the hardest currently-unlocked
+  // correlation as a starting point — then it's just a normal advanced-mode
+  // config the fields below can hand-tune further.
+  const seedFromDifficulty = () => {
+    const base = difficultyToParams(seedDifficulty);
+    const pool = unlockedCorrelations(seedDifficulty);
+    set('advancedParams', { ...config.advancedParams, ...base, correlation: pool[pool.length - 1] });
+  };
 
   return (
     <div className="setup-screen">
@@ -66,6 +79,18 @@ function SetupScreen({ initialConfig, onStart }: SetupScreenProps) {
 
       {config.mode === 'advanced' && (
         <div className="settings-group">
+          <div className="setting-row">
+            <label>Seed from difficulty</label>
+            <input
+              type="number"
+              min={0}
+              value={seedDifficulty}
+              onChange={(e) => setSeedDifficulty(Number(e.target.value))}
+            />
+            <button type="button" onClick={seedFromDifficulty}>
+              Fill fields
+            </button>
+          </div>
           <div className="setting-row">
             <label>Number of items</label>
             <input
@@ -153,6 +178,34 @@ function SetupScreen({ initialConfig, onStart }: SetupScreenProps) {
               ))}
             </select>
           </div>
+          <div className="setting-row">
+            <label>Correlation tightness ({Math.round((config.advancedParams.correlationTightness ?? 0) * 100)}%)</label>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={Math.round((config.advancedParams.correlationTightness ?? 0) * 100)}
+              onChange={(e) =>
+                set('advancedParams', { ...config.advancedParams, correlationTightness: Number(e.target.value) / 100 })
+              }
+            />
+          </div>
+          <div className="setting-row">
+            <label>Greedy trap ({Math.round(trapStrengthOf(config.advancedParams.trap) * 100)}%)</label>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={Math.round(trapStrengthOf(config.advancedParams.trap) * 100)}
+              onChange={(e) =>
+                set('advancedParams', { ...config.advancedParams, trap: trapFromStrength(Number(e.target.value) / 100) })
+              }
+            />
+          </div>
+          <p className="help-text">
+            Tightness and greedy trap are the two levers that keep a naive value/weight-ratio strategy from working —
+            see the training/adaptive engine, which drives both automatically from a single difficulty number.
+          </p>
           <button type="button" className="reset-button" onClick={() => set('advancedParams', DEFAULT_ADVANCED_PARAMS)}>
             Reset these parameters
           </button>

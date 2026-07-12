@@ -86,6 +86,22 @@ function trapParams(difficulty: number): { decoyWasteFrac: number; marginFrac: n
   return { decoyWasteFrac: TRAP_DECOY_WASTE_FRAC, marginFrac };
 }
 
+// Manual-mode equivalents of trapParams, so advanced mode can dial the same
+// trap in directly (as a single 0-1 "strength" knob) instead of only ever
+// getting it indirectly through a difficulty number. Both use the same fixed
+// decoyWasteFrac, so seeding from a difficulty and hand-tuning afterward
+// round-trip consistently.
+export function trapFromStrength(strength: number): GenerationParams['trap'] {
+  const s = Math.max(0, Math.min(1, strength));
+  if (s <= 0) return undefined;
+  return { decoyWasteFrac: TRAP_DECOY_WASTE_FRAC, marginFrac: TRAP_DECOY_WASTE_FRAC * 0.97 * s };
+}
+
+export function trapStrengthOf(trap: GenerationParams['trap']): number {
+  if (!trap) return 0;
+  return Math.max(0, Math.min(1, trap.marginFrac / (TRAP_DECOY_WASTE_FRAC * 0.97)));
+}
+
 // Overwrites 3 items in place with the decoy + 2-item trap combination
 // described above. Layered on top of whichever correlation already
 // generated the rest of the instance — orthogonal to correlation type, so it
