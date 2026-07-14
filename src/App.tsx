@@ -13,9 +13,10 @@ import {
 import {
   difficultyToParams,
   drawCorrelation,
-  drawDim2,
+  drawDim2AndConflict,
   generateInstance,
   type CorrelationBag,
+  type ConflictBag,
   type Dim2Bag,
 } from './instanceGenerator';
 import { solveKnapsack } from './knapsackSolver';
@@ -35,27 +36,39 @@ function paramsForConfig(
   staircase: StaircaseState | null,
   bag: CorrelationBag | null,
   dim2Bag: Dim2Bag | null,
-): { params: GenerationParams; bag: CorrelationBag; dim2Bag: Dim2Bag } {
+  conflictBag: ConflictBag | null,
+): { params: GenerationParams; bag: CorrelationBag; dim2Bag: Dim2Bag; conflictBag: ConflictBag } {
   if (config.mode === 'advanced') {
     return {
       params: config.advancedParams,
       bag: bag ?? { pool: [], queue: [], lastDrawn: null },
-      dim2Bag: dim2Bag ?? { unlocked: false, queue: [] },
+      dim2Bag: dim2Bag ?? { accumulator: 0 },
+      conflictBag: conflictBag ?? { accumulator: 0 },
     };
   }
   const difficulty = staircase!.difficulty;
   const base = difficultyToParams(difficulty);
   const { correlation, bag: nextBag } = drawCorrelation(difficulty, bag, Math.random);
-  // dim2 is capped to ~1-in-5 rounds (see drawDim2) rather than applying to
-  // every unlocked round, so it stays a special case to recognize instead of
-  // crowding out correlation-regime switching. A dim2 round replaces the
-  // trap for that round rather than combining with it (see the interference
-  // note in generateInstance).
-  const { dim2, bag: nextDim2Bag } = drawDim2(difficulty, dim2Bag, Math.random);
+  // dim2's and conflict's rates both ramp with difficulty (see
+  // drawDim2AndConflict) rather than applying to every unlocked round, so
+  // each stays a recurring special case rather than crowding out
+  // correlation-regime switching entirely. Both accumulators are updated
+  // jointly (not sequentially) so neither mechanism's actual rate is thinned
+  // by the other firing first. A dim2 or conflict round replaces the trap
+  // for that round rather than combining with it (see the interference note
+  // in generateInstance).
+  const {
+    dim2,
+    conflict,
+    dim2Bag: nextDim2Bag,
+    conflictBag: nextConflictBag,
+  } = drawDim2AndConflict(difficulty, dim2Bag, conflictBag);
   const params: GenerationParams = dim2
-    ? { ...base, correlation, dim2, trap: undefined }
-    : { ...base, correlation, dim2: undefined };
-  return { params, bag: nextBag, dim2Bag: nextDim2Bag };
+    ? { ...base, correlation, dim2, trap: undefined, conflict: undefined }
+    : conflict
+      ? { ...base, correlation, conflict, trap: undefined, dim2: undefined }
+      : { ...base, correlation, dim2: undefined, conflict: undefined };
+  return { params, bag: nextBag, dim2Bag: nextDim2Bag, conflictBag: nextConflictBag };
 }
 
 function App() {
@@ -65,6 +78,7 @@ function App() {
   const [staircase, setStaircase] = useState<StaircaseState | null>(null);
   const [correlationBag, setCorrelationBag] = useState<CorrelationBag | null>(null);
   const [dim2Bag, setDim2Bag] = useState<Dim2Bag | null>(null);
+  const [conflictBag, setConflictBag] = useState<ConflictBag | null>(null);
   const [round, setRound] = useState(0);
   const [instance, setInstance] = useState<SolvedInstance | null>(null);
   const [currentCorrelation, setCurrentCorrelation] = useState<CorrelationType>('uncorrelated');
@@ -80,10 +94,22 @@ function App() {
   const currentDifficulty = staircase?.difficulty ?? 0;
 
   const spawnProblem = useCallback(
-    (cfg: SessionConfig, sc: StaircaseState | null, bag: CorrelationBag | null, d2Bag: Dim2Bag | null) => {
-      const { params, bag: nextBag, dim2Bag: nextDim2Bag } = paramsForConfig(cfg, sc, bag, d2Bag);
+    (
+      cfg: SessionConfig,
+      sc: StaircaseState | null,
+      bag: CorrelationBag | null,
+      d2Bag: Dim2Bag | null,
+      cBag: ConflictBag | null,
+    ) => {
+      const {
+        params,
+        bag: nextBag,
+        dim2Bag: nextDim2Bag,
+        conflictBag: nextConflictBag,
+      } = paramsForConfig(cfg, sc, bag, d2Bag, cBag);
       setCorrelationBag(nextBag);
       setDim2Bag(nextDim2Bag);
+      setConflictBag(nextConflictBag);
       setCurrentCorrelation(params.correlation);
       const solved = solveKnapsack(generateInstance(params, Math.floor(Math.random() * 2 ** 31)));
       setInstance(solved);
@@ -106,7 +132,7 @@ function App() {
       setRound(0);
       setTrials([]);
       // Fresh bags each session — the shuffle only needs to hold within one run.
-      spawnProblem(cfg, sc, null, null);
+      spawnProblem(cfg, sc, null, null, null);
       setView('game');
     },
     [spawnProblem],
@@ -148,10 +174,13 @@ function App() {
     const totalWeight2 = instance.weights2
       ? selected.reduce((s, on, i) => (on ? s + instance.weights2![i] : s), 0)
       : 0;
-    const withinCapacity =
-      totalWeight <= instance.capacity && (instance.capacity2 === undefined || totalWeight2 <= instance.capacity2);
-    const qualityRatio = withinCapacity && instance.optimalValue > 0 ? totalValue / instance.optimalValue : 0;
-    const success = withinCapacity && qualityRatio >= SUCCESS_QUALITY_THRESHOLD;
+    const conflictOk = !instance.conflicts || instance.conflicts.every(([a, b]) => !(selected[a] && selected[b]));
+    const feasible =
+      totalWeight <= instance.capacity &&
+      (instance.capacity2 === undefined || totalWeight2 <= instance.capacity2) &&
+      conflictOk;
+    const qualityRatio = feasible && instance.optimalValue > 0 ? totalValue / instance.optimalValue : 0;
+    const success = feasible && qualityRatio >= SUCCESS_QUALITY_THRESHOLD;
     const timeUsedMs = Date.now() - startedAtRef.current;
     const timeLimitMs = config.timeMode === 'timed' ? config.timeLimitSeconds * 1000 : null;
 
@@ -183,8 +212,8 @@ function App() {
       return;
     }
     setRound((r) => r + 1);
-    spawnProblem(config, staircase, correlationBag, dim2Bag);
-  }, [round, config, staircase, correlationBag, dim2Bag, spawnProblem]);
+    spawnProblem(config, staircase, correlationBag, dim2Bag, conflictBag);
+  }, [round, config, staircase, correlationBag, dim2Bag, conflictBag, spawnProblem]);
 
   return (
     <div className="app">

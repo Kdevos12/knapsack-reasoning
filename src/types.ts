@@ -11,6 +11,11 @@ export interface KnapsackInstance {
   // independent constraint can also bind — see instanceGenerator.dim2Params.
   weights2?: number[];
   capacity2?: number;
+  // Pairwise incompatibilities: index pairs that can never both be selected — see
+  // instanceGenerator.conflictParams/injectConflicts. Mutually exclusive with weights2/capacity2;
+  // solveKnapsack dispatches to the branch-and-bound conflict solver instead of the 2D DP whenever
+  // this is present, never both.
+  conflicts?: [number, number][];
 }
 
 export interface SolvedInstance extends KnapsackInstance {
@@ -58,6 +63,11 @@ export interface GenerationParams {
   // decision-making literature both treat as requiring different solution
   // machinery, not just a harder version of the same one.
   dim2?: { spread2: number; capRatio2: number };
+  // A deterministic adversarial conflict pair (mirrors `trap`'s decoy logic) plus a background
+  // density of random conflict edges — see instanceGenerator.conflictParams/injectConflicts. A
+  // fourth distinct axis from tightness/trap/dim2: no ratio or capacity reasoning resolves it,
+  // since a locally best item can be the wrong pick purely because of which other item it rules out.
+  conflict?: { weightBumpFrac: number; marginFrac: number; pairFraction: number; backgroundDensity: number };
 }
 
 // 'training' (fixed-difficulty, no auto-adjustment) was removed: advanced

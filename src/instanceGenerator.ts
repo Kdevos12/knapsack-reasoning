@@ -52,11 +52,13 @@ export function difficultyToParams(difficulty: number): Omit<GenerationParams, '
     capacityRatio,
     correlationTightness,
     trap: trapParams(difficulty) ?? undefined,
-    // The dim2 config an unlocked round *would* use if drawn — advanced
-    // mode's "seed from difficulty" wants this unconditionally. Adaptive
-    // mode overrides it per round via drawDim2 instead of using it directly
-    // (see App.tsx), so dim2 doesn't dominate every round once unlocked.
+    // The dim2/conflict config an unlocked round *would* use if drawn —
+    // advanced mode's "seed from difficulty" wants this unconditionally.
+    // Adaptive mode overrides both per round via drawDim2AndConflict instead
+    // of using them directly (see App.tsx), so neither dominates every round
+    // once unlocked.
     dim2: dim2Params(difficulty) ?? undefined,
+    conflict: conflictParams(difficulty) ?? undefined,
   };
 }
 
@@ -213,38 +215,255 @@ export function dim2StrengthOf(dim2: GenerationParams['dim2']): number {
 // Naively, once dim2 unlocks it could just apply to every round — but that
 // makes it the dominant mode rather than a special case to recognize, and
 // crowds out the correlation-regime switching that's the rest of this
-// engine's whole point. Held to a fixed 1-in-10 (10%) rate instead, via the
-// same shuffle-bag pattern as drawCorrelation (bounded worst-case gap of
-// ~19 rounds between dim2 rounds) rather than a flat 10% coin flip per
-// round, which could leave long droughts or unlucky streaks to chance the
-// same way pure-random correlation picking did before the correlation bag
-// existed.
-const DIM2_ROUND_POOL: readonly boolean[] = [true, false, false, false, false, false, false, false, false, false];
+// engine's whole point. Rate itself ramps with difficulty like every other
+// dim2 parameter: 25% right at unlock, rising to 35% by difficulty 500 (then
+// holding), rather than a single fixed rate for the whole difficulty range.
+// The ceiling was lowered from an earlier 50% specifically to leave room for
+// the conflict-graph mechanism's own up-to-35% share (see conflictRate
+// below) without the two together crowding out every trap/plain round.
+const DIM2_RATE_MIN = 0.25;
+const DIM2_RATE_MAX = 0.35;
+const DIM2_RATE_MAX_DIFFICULTY = 500;
 
-export interface Dim2Bag {
-  unlocked: boolean;
-  queue: boolean[];
+function dim2Rate(difficulty: number): number {
+  if (difficulty < DIM2_START_DIFFICULTY) return 0;
+  const t = Math.min(1, (difficulty - DIM2_START_DIFFICULTY) / (DIM2_RATE_MAX_DIFFICULTY - DIM2_START_DIFFICULTY));
+  return lerp(DIM2_RATE_MIN, DIM2_RATE_MAX, t);
 }
 
-export function drawDim2(
-  difficulty: number,
-  bag: Dim2Bag | null,
-  rng: () => number,
-): { dim2: GenerationParams['dim2']; bag: Dim2Bag } {
-  const unlocked = difficulty >= DIM2_START_DIFFICULTY;
-  if (!unlocked) {
-    return { dim2: undefined, bag: { unlocked: false, queue: [] } };
-  }
+// A shuffled fixed-size pool (the correlation bag's approach) assumes a
+// constant target rate for the length of a cycle; it doesn't fit a rate that
+// keeps rising round to round. This is a leaky-bucket accumulator instead:
+// each round adds the *current* rate to a running total, and fires as soon
+// as that total reaches 1, subtracting 1 and carrying the remainder forward.
+// It's deterministic (not the correlation bag's shuffle), but that's fine
+// here — unlike correlation type, knowing a dim2 round is "due" doesn't
+// telegraph anything about how to solve it, and determinism gives the same
+// bounded-worst-case-gap guarantee the shuffle bag was built for (gap <=
+// ceil(1/rate), tightening as rate rises) without needing to rebuild a pool
+// every time the target rate itself moves.
+export interface Dim2Bag {
+  accumulator: number;
+}
 
-  let queue = bag?.unlocked ? bag.queue : [];
-  if (queue.length === 0) {
-    queue = shuffle(DIM2_ROUND_POOL as boolean[], rng);
-  }
+export function drawDim2(difficulty: number, bag: Dim2Bag | null): { dim2: GenerationParams['dim2']; bag: Dim2Bag } {
+  const rate = dim2Rate(difficulty);
+  if (rate <= 0) return { dim2: undefined, bag: { accumulator: 0 } };
 
-  const [isDim2Round, ...rest] = queue;
+  const acc = (bag?.accumulator ?? 0) + rate;
+  if (acc >= 1) {
+    return { dim2: dim2Params(difficulty), bag: { accumulator: acc - 1 } };
+  }
+  return { dim2: undefined, bag: { accumulator: acc } };
+}
+
+// A fourth axis, orthogonal to tightness/trap/dim2: some item pairs are
+// mutually incompatible (the "Knapsack Problem with Conflict Graph" /
+// Disjunctively Constrained Knapsack Problem in the OR literature). No ratio
+// or capacity reasoning resolves this — a locally best-ratio item can be the
+// wrong pick purely because of which other item it rules out, which defeats
+// heuristics that never track pairwise relationships at all.
+//
+// First version of this (kept out of the repo, but worth recording why it
+// changed): a single forced pair where both members individually wasted
+// enough capacity that nothing else could join either one, mirroring
+// injectGreedyTrap's "decoy wastes capacity" trick. Measured against the
+// exact solver, that made the conflict edge *redundant* with plain capacity
+// reasoning (both members were already mutually exclusive by weight alone,
+// conflict or not) — ratio-greedy-skip-conflicting and max-independent-
+// set-first both measured 92-99% success at unlock, and best-of-20 random
+// conflict-aware fill stayed ~90%+ at every difficulty tested, meaning the
+// conflict graph wasn't creating any real combinatorial difficulty distinct
+// from what trap already provides. Fixed by moving to *many* modest-weight
+// forced pairs (scaling with difficulty) instead of one capacity-dominating
+// one — each pair's "B" item keeps A's already-generated (correlation-
+// appropriate) weight/value as its ratio anchor and only gets bumped
+// heavier-and-more-valuable than A, so pairs blend into the rest of the
+// packing rather than each dominating capacity on their own. This is closer
+// to the actual OR-literature source of hardness in conflict-graph knapsack
+// (a graph dense/structured enough that finding a good independent packing
+// is itself hard for greedy or blind search), not a single adversarial
+// swap.
+const CONFLICT_START_DIFFICULTY = 100;
+const CONFLICT_WEIGHT_BUMP_FRAC = 0.35; // fixed; each pair's B is this much heavier than its A
+const CONFLICT_GROWTH_RATE = 200;
+// nItems saturates at its cap (SAFETY_BOUNDS.nItemsMax + MAX_EXTRA_ITEMS) by
+// around difficulty 200 (see difficultyToParams), so from there on this
+// mechanism's own difficulty comes entirely from pairFraction/
+// backgroundDensity/marginFrac growth, not from more items — these ramps
+// need to reach their working range well before difficulty 500, not linger
+// at low density into the thousands, or a maxed-out item pool's redundancy
+// makes conflict-aware ratio heuristics look artificially strong for most
+// of the difficulty range a player actually encounters.
+const CONFLICT_PAIR_FRACTION_MAX_DIFFICULTY = 400;
+const CONFLICT_MAX_PAIR_FRACTION = 0.35; // at most this share of items become forced-pair members
+const CONFLICT_BACKGROUND_MAX_DIFFICULTY = 400;
+const CONFLICT_MAX_DEGREE = 4;
+
+function conflictParams(difficulty: number): GenerationParams['conflict'] | null {
+  if (difficulty < CONFLICT_START_DIFFICULTY) return null;
+  const x = (difficulty - CONFLICT_START_DIFFICULTY) / CONFLICT_GROWTH_RATE;
+  const growth = x / (1 + x); // asymptotic, same shape as trapParams
+  // Stays under CONFLICT_WEIGHT_BUMP_FRAC always (0.85 ceiling) — that's
+  // what keeps each pair's B ratio below its A, required for greedy-by-ratio
+  // to prefer A first, every time.
+  const marginFrac = CONFLICT_WEIGHT_BUMP_FRAC * (0.15 + 0.7 * growth);
+  const pairFraction = lerp(0.15, CONFLICT_MAX_PAIR_FRACTION, Math.min(1, difficulty / CONFLICT_PAIR_FRACTION_MAX_DIFFICULTY));
+  // Fraction of (non-paired) items routed into background cliques — see
+  // injectConflicts. Not an edge count: CONFLICT_CLIQUE_SIZE-sized groups.
+  const backgroundDensity = lerp(0.12, 0.4, Math.min(1, difficulty / CONFLICT_BACKGROUND_MAX_DIFFICULTY));
+  return { weightBumpFrac: CONFLICT_WEIGHT_BUMP_FRAC, marginFrac, pairFraction, backgroundDensity };
+}
+
+// Manual-mode equivalent, mirroring trapFromStrength/trapStrengthOf.
+export function conflictFromStrength(strength: number): GenerationParams['conflict'] {
+  const s = Math.max(0, Math.min(1, strength));
+  if (s <= 0) return undefined;
   return {
-    dim2: isDim2Round ? dim2Params(difficulty) : undefined,
-    bag: { unlocked: true, queue: rest },
+    weightBumpFrac: CONFLICT_WEIGHT_BUMP_FRAC,
+    marginFrac: CONFLICT_WEIGHT_BUMP_FRAC * 0.85 * s,
+    pairFraction: lerp(0.15, CONFLICT_MAX_PAIR_FRACTION, s),
+    backgroundDensity: lerp(0.12, 0.4, s),
+  };
+}
+
+export function conflictStrengthOf(conflict: GenerationParams['conflict']): number {
+  if (!conflict) return 0;
+  return Math.max(0, Math.min(1, conflict.marginFrac / (CONFLICT_WEIGHT_BUMP_FRAC * 0.85)));
+}
+
+const CONFLICT_CLIQUE_SIZE = 3;
+
+// Pairs up round(nItems * pairFraction / 2) *random* items (not fixed
+// indices — every item is a potential pair member, unlike the single-pair
+// first version) and, within each pair, overwrites only the heavier-cast
+// "B" member: B's weight becomes A's weight plus a fixed fraction more, and
+// B's value is bumped just enough to exceed A's while keeping B's ratio
+// below A's (see conflictParams). A keeps whatever weight/value the
+// correlation regime already gave it, so each pair's "which one is
+// actually better" decision stays tied to the instance's correlation shape
+// instead of an independent, disconnected trap.
+//
+// The remaining background structure uses small cliques (fully-connected
+// groups of CONFLICT_CLIQUE_SIZE items — "at most one of these can be
+// picked") rather than scattered independent edges: measured, independent
+// edges barely dented a blind random-search heuristic's success rate (it
+// stayed ~65-85% at every difficulty tested, since a large item pool has
+// enough redundancy that avoiding a few scattered bad pairs by luck is
+// easy) even at a high edge density, while a smaller number of genuine
+// "pick-at-most-one-of-k" clique constraints is a much stronger restriction
+// per edge spent.
+function injectConflicts(
+  weights: number[],
+  values: number[],
+  conflict: { weightBumpFrac: number; marginFrac: number; pairFraction: number; backgroundDensity: number },
+  rng: () => number,
+): [number, number][] {
+  const n = weights.length;
+  if (n < 2) return [];
+
+  const order = shuffle(
+    Array.from({ length: n }, (_, i) => i),
+    rng,
+  );
+  const numPairs = Math.min(Math.floor(n / 2), Math.max(1, Math.floor((n * conflict.pairFraction) / 2)));
+
+  const conflicts: [number, number][] = [];
+  const degree = new Array(n).fill(0);
+  const usedInPair = new Set<number>();
+
+  for (let p = 0; p < numPairs; p++) {
+    const idxA = order[2 * p];
+    const idxB = order[2 * p + 1];
+    const wA = weights[idxA];
+    const vA = values[idxA];
+    const bump = Math.max(1, Math.round(wA * conflict.weightBumpFrac));
+    weights[idxB] = wA + bump;
+    values[idxB] = Math.max(vA + 1, Math.round(vA * (1 + conflict.marginFrac)));
+    conflicts.push(idxA < idxB ? [idxA, idxB] : [idxB, idxA]);
+    degree[idxA]++;
+    degree[idxB]++;
+    usedInPair.add(idxA);
+    usedInPair.add(idxB);
+  }
+
+  const remaining = order.filter((i) => !usedInPair.has(i));
+  const numCliqueItems = Math.min(remaining.length, Math.round(n * conflict.backgroundDensity));
+  const cliquePool = remaining.slice(0, numCliqueItems);
+  for (let c = 0; c + CONFLICT_CLIQUE_SIZE <= cliquePool.length; c += CONFLICT_CLIQUE_SIZE) {
+    const members = cliquePool.slice(c, c + CONFLICT_CLIQUE_SIZE);
+    if (members.some((m) => degree[m] >= CONFLICT_MAX_DEGREE)) continue;
+    for (let x = 0; x < members.length; x++) {
+      for (let y = x + 1; y < members.length; y++) {
+        const [a, b] = members[x] < members[y] ? [members[x], members[y]] : [members[y], members[x]];
+        conflicts.push([a, b]);
+        degree[a]++;
+        degree[b]++;
+      }
+    }
+  }
+  return conflicts;
+}
+
+export interface ConflictBag {
+  accumulator: number;
+}
+
+function conflictRate(difficulty: number): number {
+  if (difficulty < CONFLICT_START_DIFFICULTY) return 0;
+  const t = Math.min(1, (difficulty - CONFLICT_START_DIFFICULTY) / (500 - CONFLICT_START_DIFFICULTY));
+  return lerp(0.2, 0.35, t);
+}
+
+// Orchestrates dim2's and conflict's leaky-bucket accumulators together
+// rather than checking them sequentially. A sequential "check dim2's bag,
+// else check conflict's bag" scheme thins the second-checked mechanism's
+// real rate below its nominal target (multiplicative shrinkage: a nominal
+// 35% mechanism checked only on rounds a 35%-drawing first mechanism didn't
+// already claim actually fires on ~(1-0.35)*0.35 = 22.75% of rounds, not
+// 35%). Instead both accumulators grow every round unconditionally. On the
+// rare round both cross their threshold simultaneously, dim2 is served
+// (fixed precedence) and conflict's accumulator is deliberately NOT
+// decremented — it stays >= 1, so it's guaranteed to fire the very next
+// round instead. This shifts *when* a fire lands by at most one round
+// without ever dropping one, so each mechanism's long-run rate matches its
+// nominal target exactly rather than approximately.
+export function drawDim2AndConflict(
+  difficulty: number,
+  dim2Bag: Dim2Bag | null,
+  conflictBag: ConflictBag | null,
+): {
+  dim2: GenerationParams['dim2'];
+  conflict: GenerationParams['conflict'];
+  dim2Bag: Dim2Bag;
+  conflictBag: ConflictBag;
+} {
+  const dim2Acc = (dim2Bag?.accumulator ?? 0) + dim2Rate(difficulty);
+  const conflictAcc = (conflictBag?.accumulator ?? 0) + conflictRate(difficulty);
+  const dim2Due = dim2Acc >= 1;
+  const conflictDue = conflictAcc >= 1;
+
+  if (dim2Due) {
+    return {
+      dim2: dim2Params(difficulty),
+      conflict: undefined,
+      dim2Bag: { accumulator: dim2Acc - 1 },
+      conflictBag: { accumulator: conflictAcc },
+    };
+  }
+  if (conflictDue) {
+    return {
+      dim2: undefined,
+      conflict: conflictParams(difficulty) ?? undefined,
+      dim2Bag: { accumulator: dim2Acc },
+      conflictBag: { accumulator: conflictAcc - 1 },
+    };
+  }
+  return {
+    dim2: undefined,
+    conflict: undefined,
+    dim2Bag: { accumulator: dim2Acc },
+    conflictBag: { accumulator: conflictAcc },
   };
 }
 
@@ -363,17 +582,24 @@ export function generateInstance(params: GenerationParams, seed: number = Date.n
   const [vMin, vMax] = valueRange;
   const span = vMax - vMin;
 
-  // Trap and dim2 are two different mechanisms for defeating the same
-  // trained "rank by ratio" heuristic and were measured to interfere badly
-  // when combined on the same instance (the trap's decoy/combo weights are
-  // tuned against a single capacity and can accidentally violate or dodge
-  // the second one, producing an unpredictable — and once measured,
-  // anomalously *easier* — result). App.tsx's drawDim2 already keeps them
-  // mutually exclusive for adaptive mode; this coin flip is the remaining
-  // safeguard for advanced mode, where a player can set both sliders by
+  // Trap, dim2, and conflict are three different mechanisms for defeating
+  // the same trained "rank by ratio" heuristic family and were measured (or
+  // are architecturally certain, in conflict's case) to interfere badly when
+  // combined on the same instance (trap's decoy/combo weights are tuned
+  // against a single capacity and can accidentally violate or dodge a second
+  // one — measured, for trap+dim2, to produce an anomalous 100% success
+  // rate). App.tsx's drawDim2AndConflict already keeps them mutually
+  // exclusive for adaptive mode; this fair N-way pick is the remaining
+  // safeguard for advanced mode, where a player can set multiple sliders by
   // hand.
-  const useTrap = !!params.trap && (!dim2 || rng() < 0.5);
-  const useDim2 = !!dim2 && !useTrap;
+  const active: Array<'trap' | 'dim2' | 'conflict'> = [];
+  if (params.trap) active.push('trap');
+  if (dim2) active.push('dim2');
+  if (params.conflict) active.push('conflict');
+  const chosen = active.length > 0 ? active[Math.floor(rng() * active.length)] : null;
+  const useTrap = chosen === 'trap';
+  const useDim2 = chosen === 'dim2';
+  const useConflict = chosen === 'conflict';
 
   let values: number[];
   let weights2: number[] | undefined;
@@ -424,6 +650,11 @@ export function generateInstance(params: GenerationParams, seed: number = Date.n
     const totalWeight2 = weights2!.reduce((s, w) => s + w, 0);
     const capacity2 = Math.max(1, Math.round(totalWeight2 * dim2!.capRatio2));
     return { weights, values, capacity, weights2, capacity2 };
+  }
+
+  if (useConflict) {
+    const conflicts = injectConflicts(weights, values, params.conflict!, rng);
+    return { weights, values, capacity, conflicts };
   }
 
   return { weights, values, capacity };
