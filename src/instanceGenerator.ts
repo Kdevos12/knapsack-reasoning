@@ -213,39 +213,43 @@ export function dim2StrengthOf(dim2: GenerationParams['dim2']): number {
 // Naively, once dim2 unlocks it could just apply to every round — but that
 // makes it the dominant mode rather than a special case to recognize, and
 // crowds out the correlation-regime switching that's the rest of this
-// engine's whole point. Held to a fixed 1-in-10 (10%) rate instead, via the
-// same shuffle-bag pattern as drawCorrelation (bounded worst-case gap of
-// ~19 rounds between dim2 rounds) rather than a flat 10% coin flip per
-// round, which could leave long droughts or unlucky streaks to chance the
-// same way pure-random correlation picking did before the correlation bag
-// existed.
-const DIM2_ROUND_POOL: readonly boolean[] = [true, false, false, false, false, false, false, false, false, false];
+// engine's whole point. Rate itself ramps with difficulty like every other
+// dim2 parameter: 25% right at unlock, rising to 50% by difficulty 500 (then
+// holding), rather than a single fixed rate for the whole difficulty range.
+const DIM2_RATE_MIN = 0.25;
+const DIM2_RATE_MAX = 0.5;
+const DIM2_RATE_MAX_DIFFICULTY = 500;
 
-export interface Dim2Bag {
-  unlocked: boolean;
-  queue: boolean[];
+function dim2Rate(difficulty: number): number {
+  if (difficulty < DIM2_START_DIFFICULTY) return 0;
+  const t = Math.min(1, (difficulty - DIM2_START_DIFFICULTY) / (DIM2_RATE_MAX_DIFFICULTY - DIM2_START_DIFFICULTY));
+  return lerp(DIM2_RATE_MIN, DIM2_RATE_MAX, t);
 }
 
-export function drawDim2(
-  difficulty: number,
-  bag: Dim2Bag | null,
-  rng: () => number,
-): { dim2: GenerationParams['dim2']; bag: Dim2Bag } {
-  const unlocked = difficulty >= DIM2_START_DIFFICULTY;
-  if (!unlocked) {
-    return { dim2: undefined, bag: { unlocked: false, queue: [] } };
-  }
+// A shuffled fixed-size pool (the correlation bag's approach) assumes a
+// constant target rate for the length of a cycle; it doesn't fit a rate that
+// keeps rising round to round. This is a leaky-bucket accumulator instead:
+// each round adds the *current* rate to a running total, and fires as soon
+// as that total reaches 1, subtracting 1 and carrying the remainder forward.
+// It's deterministic (not the correlation bag's shuffle), but that's fine
+// here — unlike correlation type, knowing a dim2 round is "due" doesn't
+// telegraph anything about how to solve it, and determinism gives the same
+// bounded-worst-case-gap guarantee the shuffle bag was built for (gap <=
+// ceil(1/rate), tightening as rate rises) without needing to rebuild a pool
+// every time the target rate itself moves.
+export interface Dim2Bag {
+  accumulator: number;
+}
 
-  let queue = bag?.unlocked ? bag.queue : [];
-  if (queue.length === 0) {
-    queue = shuffle(DIM2_ROUND_POOL as boolean[], rng);
-  }
+export function drawDim2(difficulty: number, bag: Dim2Bag | null): { dim2: GenerationParams['dim2']; bag: Dim2Bag } {
+  const rate = dim2Rate(difficulty);
+  if (rate <= 0) return { dim2: undefined, bag: { accumulator: 0 } };
 
-  const [isDim2Round, ...rest] = queue;
-  return {
-    dim2: isDim2Round ? dim2Params(difficulty) : undefined,
-    bag: { unlocked: true, queue: rest },
-  };
+  const acc = (bag?.accumulator ?? 0) + rate;
+  if (acc >= 1) {
+    return { dim2: dim2Params(difficulty), bag: { accumulator: acc - 1 } };
+  }
+  return { dim2: undefined, bag: { accumulator: acc } };
 }
 
 // Correlation type is what actually forces a heuristic switch (a ratio/greedy

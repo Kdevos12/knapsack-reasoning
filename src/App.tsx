@@ -40,18 +40,18 @@ function paramsForConfig(
     return {
       params: config.advancedParams,
       bag: bag ?? { pool: [], queue: [], lastDrawn: null },
-      dim2Bag: dim2Bag ?? { unlocked: false, queue: [] },
+      dim2Bag: dim2Bag ?? { accumulator: 0 },
     };
   }
   const difficulty = staircase!.difficulty;
   const base = difficultyToParams(difficulty);
   const { correlation, bag: nextBag } = drawCorrelation(difficulty, bag, Math.random);
-  // dim2 is capped to ~1-in-5 rounds (see drawDim2) rather than applying to
-  // every unlocked round, so it stays a special case to recognize instead of
-  // crowding out correlation-regime switching. A dim2 round replaces the
-  // trap for that round rather than combining with it (see the interference
-  // note in generateInstance).
-  const { dim2, bag: nextDim2Bag } = drawDim2(difficulty, dim2Bag, Math.random);
+  // dim2's rate ramps from 25% to 50% with difficulty (see drawDim2) rather
+  // than applying to every unlocked round, so it stays a recurring special
+  // case rather than crowding out correlation-regime switching entirely. A
+  // dim2 round replaces the trap for that round rather than combining with
+  // it (see the interference note in generateInstance).
+  const { dim2, bag: nextDim2Bag } = drawDim2(difficulty, dim2Bag);
   const params: GenerationParams = dim2
     ? { ...base, correlation, dim2, trap: undefined }
     : { ...base, correlation, dim2: undefined };
