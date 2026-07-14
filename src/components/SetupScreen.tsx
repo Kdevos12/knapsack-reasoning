@@ -3,6 +3,8 @@ import type { CorrelationType, SessionConfig, SessionMode, TimeMode } from '../t
 import { DEFAULT_ADVANCED_PARAMS } from '../types';
 import { loadSavedDifficulty } from '../adaptiveEngine';
 import {
+  conflictFromStrength,
+  conflictStrengthOf,
   difficultyToParams,
   dim2FromStrength,
   dim2StrengthOf,
@@ -208,10 +210,27 @@ function SetupScreen({ initialConfig, onStart }: SetupScreenProps) {
               }
             />
           </div>
+          <div className="setting-row">
+            <label>Conflict density ({Math.round(conflictStrengthOf(config.advancedParams.conflict) * 100)}%)</label>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={Math.round(conflictStrengthOf(config.advancedParams.conflict) * 100)}
+              onChange={(e) =>
+                set('advancedParams', {
+                  ...config.advancedParams,
+                  conflict: conflictFromStrength(Number(e.target.value) / 100),
+                })
+              }
+            />
+          </div>
           <p className="help-text">
             Tightness and greedy trap keep a naive value/weight-ratio strategy from working on a single constraint;
             the second dimension adds a genuinely independent capacity (e.g. volume) so no single ratio can rank
-            items at all — adaptive mode drives all three automatically from one difficulty number.
+            items at all; conflict density adds pairs of mutually incompatible items so no ratio or capacity
+            reasoning alone resolves the pick — adaptive mode drives all four automatically from one difficulty
+            number.
           </p>
           <button type="button" className="reset-button" onClick={() => set('advancedParams', DEFAULT_ADVANCED_PARAMS)}>
             Reset these parameters

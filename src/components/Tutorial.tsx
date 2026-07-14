@@ -22,6 +22,7 @@ function Tutorial() {
           <li><strong>Deeper blue = more valuable item.</strong> Colour intensity mirrors value.</li>
           <li>The exact numbers are always shown: <strong>v:</strong> value (large) and <strong>w:</strong> weight (small pill).</li>
           <li>At high difficulty a tile may also show a <strong>vol:</strong> pill — a second, independent capacity you must respect alongside weight (see "Second dimension" below).</li>
+          <li>A small lettered badge in a tile's corner means it conflicts with another tile carrying the same letter — you can never select both (see "Conflict density" below).</li>
           <li>Selected items turn <strong>green</strong>. The weight (and volume, if present) gauge in the header turns red if you exceed its capacity.</li>
         </ul>
       </section>
@@ -96,6 +97,15 @@ function Tutorial() {
             Adds an independent second capacity (shown as a <strong>vol:</strong> pill and a second gauge). No single
             value/weight ratio can rank items once two constraints compete — the option that's most efficient for
             weight may be the worst for volume, so you have to weigh both at once instead of sorting by one number.
+          </dd>
+
+          <dt>Conflict density</dt>
+          <dd>
+            Some item pairs are mutually incompatible — like choosing between two mutually exclusive equipment
+            options — shown as matching connector-letter badges on the tiles. No ratio or capacity reasoning
+            resolves this: a locally excellent item can be the wrong pick purely because of which other item it
+            rules out. This is a real, well-studied combinatorial-optimization variant (the Knapsack Problem with
+            Conflict Graph, also called the Disjunctively Constrained Knapsack Problem), not invented for this app.
           </dd>
 
           <dt>Time limit</dt>

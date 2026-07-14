@@ -234,6 +234,27 @@
   opacity: 0.35;
 }
 
+.tile-conflict-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 1.3em;
+  height: 1.3em;
+  border-radius: 999px;
+  background: rgba(15, 17, 21, 0.75);
+  color: #ffd43b;
+  font-size: 0.7rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.item-tile.conflict-violation {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px rgba(224, 49, 49, 0.45), 0 3px 8px rgba(0, 0, 0, 0.35);
+}
+
 .feedback-hint {
   font-size: 0.82rem;
   color: var(--text-muted);
