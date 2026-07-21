@@ -71,8 +71,9 @@
   background: var(--warning);
 }
 
+/* ── Feedback panel — placed ABOVE the board ── */
 .feedback-panel {
-  margin: 0 1.5rem 1rem;
+  margin: 1rem 1.5rem 0;
   padding: 1rem 1.25rem;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -111,6 +112,73 @@
   color: var(--text-muted);
 }
 
+/* ── Sub-optimal warning panel ── */
+.warning-panel {
+  margin: 1rem 1.5rem 0;
+  padding: 1rem 1.25rem;
+  background: rgba(255, 180, 0, 0.07);
+  border: 1px solid var(--warning);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  align-items: center;
+  text-align: center;
+}
+
+.warning-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--warning);
+}
+
+.warning-body {
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  max-width: 420px;
+}
+
+.warning-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+.warning-back-button {
+  padding: 0.5rem 1.1rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.warning-back-button:hover {
+  background: var(--surface);
+}
+
+.warning-confirm-button {
+  padding: 0.5rem 1.1rem;
+  border-radius: 6px;
+  border: 1px solid var(--warning);
+  background: transparent;
+  color: var(--warning);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.warning-confirm-button:hover {
+  background: var(--warning);
+  color: #0f1115;
+}
+
+/* ── */
+
 .value-badge {
   display: inline-flex;
   align-items: baseline;
@@ -141,7 +209,7 @@
   justify-content: center;
   align-items: center;
   gap: 1rem;
-  padding: 2rem;
+  padding: 1.5rem 2rem;
   flex-grow: 1;
   overflow-y: auto;
 }
@@ -150,7 +218,7 @@
   position: relative;
   border-radius: 12px;
   cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -172,8 +240,8 @@
   letter-spacing: -0.02em;
 }
 
-/* Weight: a constraint already encoded by tile size — quiet reminder on a
-   fixed dark plate so it stays readable on any tile colour. */
+/* Weight / volume: a constraint already encoded by tile size — quiet reminder
+   on a fixed dark plate so it stays readable on any tile colour. */
 .tile-weight {
   display: inline-flex;
   align-items: center;
@@ -187,36 +255,35 @@
   color: #e6e8eb;
 }
 
-/* Muted lowercase prefixes — the number stays the dominant read. */
-.tile-prefix {
-  font-size: 0.62em;
-  font-weight: 600;
-  opacity: 0.65;
-  margin-right: 0.15em;
-  letter-spacing: 0;
+/* Icon prefix (★ / ⚖ / 📦) — visually distinct from number, stays small. */
+.tile-icon {
+  font-size: 0.72em;
+  opacity: 0.8;
+  margin-right: 0.1em;
 }
 
 .item-tile.light-text {
   color: #fff;
 }
 
-.board-legend {
-  text-align: center;
-  font-size: 0.78rem;
-  color: var(--text-muted);
-  padding: 0 1.5rem 0.75rem;
-}
-
-.item-tile:hover:not(.selected) {
-  transform: translateY(-3px);
-  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4);
-  border-color: var(--accent);
-}
-
+/* ── Selection: preserve the blue background, use thick green border + checkmark ── */
 .item-tile.selected {
-  color: white;
-  border-color: #8ce99a;
-  animation: pulse 1.6s infinite;
+  border: 3px solid #69db7c;
+  box-shadow: 0 0 0 2px rgba(105, 219, 124, 0.45), 0 3px 8px rgba(0, 0, 0, 0.35);
+  /* No background-color override: the blue (value encoding) stays visible */
+}
+
+/* Checkmark absolute-positioned at top-right — doesn't displace tile content */
+.tile-selected-mark {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  font-size: 0.78rem;
+  font-weight: 900;
+  color: #69db7c;
+  line-height: 1;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+  pointer-events: none;
 }
 
 .item-tile.selected .tile-weight {
@@ -255,15 +322,26 @@
   box-shadow: 0 0 0 3px rgba(224, 49, 49, 0.45), 0 3px 8px rgba(0, 0, 0, 0.35);
 }
 
+.board-legend {
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  padding: 0 1.5rem 0.75rem;
+}
+
+.item-tile:hover:not(.selected) {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4);
+  border-color: var(--accent);
+}
+
+.item-tile:hover.selected {
+  transform: translateY(-2px);
+}
+
 .feedback-hint {
   font-size: 0.82rem;
   color: var(--text-muted);
-}
-
-@keyframes pulse {
-  0% { box-shadow: 0 0 0 0 rgba(47, 158, 68, 0.5); }
-  70% { box-shadow: 0 0 0 10px rgba(47, 158, 68, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(47, 158, 68, 0); }
 }
 
 .capacity-warning {
@@ -271,7 +349,7 @@
   border: 1px solid var(--danger);
   color: #ffa8a8;
   padding: 0.75rem 1.25rem;
-  margin: 0 1.5rem 1rem;
+  margin: 0.75rem 1.5rem 0;
   border-radius: 6px;
   text-align: center;
   font-weight: 500;
@@ -311,9 +389,38 @@
   cursor: pointer;
   background: var(--success);
   color: white;
-  transition: transform 0.15s ease;
+  transition: transform 0.15s ease, opacity 0.15s ease;
 }
 
-.submit-button:hover {
+.submit-button:hover:not(:disabled) {
   transform: translateY(-2px);
+}
+
+.submit-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Undo button — secondary, clearly distinct from Submit ── */
+.undo-button {
+  min-width: 90px;
+  padding: 0.75rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  transition: transform 0.15s ease, opacity 0.15s ease, color 0.15s ease;
+}
+
+.undo-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  color: var(--text);
+}
+
+.undo-button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }

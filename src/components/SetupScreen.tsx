@@ -266,6 +266,16 @@ function SetupScreen({ initialConfig, onStart }: SetupScreenProps) {
             />
           </div>
         )}
+        <div className="setting-row" style={{ marginTop: '0.85rem' }}>
+          <label htmlFor="sub-optimal-warning-toggle">Warn if solution is improvable</label>
+          <input
+            id="sub-optimal-warning-toggle"
+            type="checkbox"
+            style={{ flex: 'none', width: '1.2rem', height: '1.2rem' }}
+            checked={config.subOptimalWarning}
+            onChange={(e) => set('subOptimalWarning', e.target.checked)}
+          />
+        </div>
       </div>
 
       <div className="settings-group">
