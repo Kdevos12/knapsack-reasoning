@@ -86,6 +86,10 @@ export interface SessionConfig {
   timeLimitSeconds: number; // per round, used when timeMode === 'timed'
   advancedParams: GenerationParams; // used when mode === 'advanced'
   soundEnabled: boolean;
+  // When true, a one-shot warning is shown after submission if the solution is
+  // sub-optimal — giving the player a single chance to reconsider before the
+  // result is recorded. No optimality % is revealed.
+  subOptimalWarning: boolean;
 }
 
 export interface Trial {
@@ -134,4 +138,5 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   timeLimitSeconds: 90,
   advancedParams: DEFAULT_ADVANCED_PARAMS,
   soundEnabled: true,
+  subOptimalWarning: true,
 };

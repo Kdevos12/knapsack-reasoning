@@ -7,6 +7,8 @@ interface GameScreenProps {
   instance: SolvedInstance;
   selected: boolean[];
   onToggle: (index: number) => void;
+  onUndo: () => void;
+  canUndo: boolean;
   onSubmit: () => void;
   onNext: () => void;
   feedback: Trial | null; // non-null while showing post-submission feedback
@@ -17,18 +19,25 @@ interface GameScreenProps {
   config: SessionConfig;
   difficulty: number;
   correlation: CorrelationType;
+  // Sub-optimal warning state: shown once before recording a non-optimal trial.
+  pendingWarning: boolean;
+  onWarningConfirm: () => void;
+  onWarningDismiss: () => void;
 }
 
 // Tile encoding follows Murawski & Bossaerts (2016, Sci. Rep.): tile size
-// scales with weight, color intensity with value, selection state is a
-// distinct color, exact numbers stay visible so the perceptual shortcut
-// never replaces the precise values. Optimality feedback is only shown
+// scales with weight (or volume in dim2 rounds), color intensity with value,
+// selection state is conveyed via border + checkmark so the blue hue that
+// encodes value stays visible, exact numbers stay visible so the perceptual
+// shortcut never replaces the precise values. Optimality feedback is only shown
 // AFTER submission — a live optimality gauge would act as an oracle and
 // defeat the reasoning task.
 function GameScreen({
   instance,
   selected,
   onToggle,
+  onUndo,
+  canUndo,
   onSubmit,
   onNext,
   feedback,
@@ -39,6 +48,9 @@ function GameScreen({
   config,
   difficulty,
   correlation,
+  pendingWarning,
+  onWarningConfirm,
+  onWarningDismiss,
 }: GameScreenProps) {
   const totalWeight = selected.reduce((s, on, i) => (on ? s + instance.weights[i] : s), 0);
   const totalValue = selected.reduce((s, on, i) => (on ? s + instance.values[i] : s), 0);
@@ -98,11 +110,26 @@ function GameScreen({
   const minV = Math.min(...instance.values);
   const maxV = Math.max(...instance.values);
 
+  // In dim2 rounds, tile size encodes volume (weight2) — bigger = more volume.
+  // In all other rounds, tile size encodes weight as before.
+  const sizeWeights = hasDim2 ? instance.weights2! : instance.weights;
+  const minSW = Math.min(...sizeWeights);
+  const maxSW = Math.max(...sizeWeights);
+
   const handleClick = useCallback(
     (i: number) => {
       if (!timedOut) onToggle(i);
     },
     [timedOut, onToggle],
+  );
+
+  // Right-click on a selected tile deselects it; no browser context menu.
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent, i: number) => {
+      e.preventDefault();
+      if (!timedOut && selected[i]) onToggle(i);
+    },
+    [timedOut, selected, onToggle],
   );
 
   const optimalityPct = feedback ? Math.round(feedback.qualityRatio * 100) : 0;
@@ -167,11 +194,62 @@ function GameScreen({
         </div>
       </div>
 
+      {/* Feedback panel — placed ABOVE the board so it's front-and-center */}
+      {feedback && (
+        <div className="feedback-panel">
+          <div className={`feedback-title ${feedback.success ? 'success' : 'failure'}`}>
+            {feedback.success ? 'Optimal!' : 'Not optimal'}
+          </div>
+          <div className="feedback-gauge-row">
+            <div className="gauge feedback-gauge">
+              <div
+                className={`gauge-fill${feedback.success ? '' : ' partial'}`}
+                style={{ width: `${optimalityPct}%` }}
+              />
+            </div>
+            <span className="feedback-pct">{optimalityPct}% of optimum</span>
+          </div>
+          <div className="feedback-hint">Gold-ringed tiles are the optimal selection — compare it with yours.</div>
+        </div>
+      )}
+
+      {/* Sub-optimal warning: shown once before committing a non-optimal trial */}
+      {pendingWarning && !feedback && (
+        <div className="warning-panel">
+          <div className="warning-title">⚠ Your solution may be improvable</div>
+          <div className="warning-body">
+            Take another look — you might find a better combination. Or submit as-is if you're confident.
+          </div>
+          <div className="warning-actions">
+            <button type="button" className="warning-back-button" onClick={onWarningDismiss}>
+              ← Keep editing
+            </button>
+            <button type="button" className="warning-confirm-button" onClick={onWarningConfirm}>
+              Submit anyway
+            </button>
+          </div>
+        </div>
+      )}
+
+      {overCapacity && !feedback && !pendingWarning && (
+        <div className="capacity-warning">
+          {hasDim2 ? 'Over weight or volume capacity — remove some items.' : 'Over capacity — remove some items.'}
+        </div>
+      )}
+      {hasConflictViolation && !feedback && !pendingWarning && (
+        <div className="capacity-warning conflict-warning">
+          Conflicting items selected — items sharing a connector letter cannot both be chosen.
+        </div>
+      )}
+      {timedOut && !feedback && <div className="time-up-overlay">Time's up — submit your solution.</div>}
+
       <div className="game-board">
         {instance.weights.map((w, i) => {
           const v = instance.values[i];
           const w2 = instance.weights2?.[i];
-          const size = 52 + ((w - minW) / (maxW - minW || 1)) * 68; // 52-120px
+          // Size encodes volume (w2) in dim2 rounds, weight otherwise.
+          const sw = sizeWeights[i];
+          const size = 52 + ((sw - minSW) / (maxSW - minSW || 1)) * 68; // 52-120px
           const intensity = Math.round(60 + ((v - minV) / (maxV - minV || 1)) * 160); // 60-220
           // Past ~130 the blue is dark enough that dark text stops being readable.
           const lightText = intensity > 130;
@@ -192,23 +270,26 @@ function GameScreen({
               style={{
                 width: size,
                 height: size,
-                backgroundColor: isSelected ? '#2f9e44' : `rgb(${255 - intensity}, ${255 - intensity}, 255)`,
+                // Keep the blue even when selected — selection is shown via border + checkmark.
+                backgroundColor: `rgb(${255 - intensity}, ${255 - intensity}, 255)`,
               }}
               onClick={() => handleClick(i)}
+              onContextMenu={(e) => handleContextMenu(e, i)}
               title={title}
             >
+              {isSelected && <span className="tile-selected-mark">✓</span>}
               {conflictLabel !== undefined && <span className="tile-conflict-badge">{conflictLabel}</span>}
               <span className="tile-value" style={{ fontSize: `${Math.max(0.9, (size / 120) * 1.7)}rem` }}>
-                <span className="tile-prefix">v:</span>
+                <span className="tile-icon">★</span>
                 {v}
               </span>
               <span className="tile-weight">
-                <span className="tile-prefix">w:</span>
+                <span className="tile-icon">⚖</span>
                 {w}
               </span>
               {w2 !== undefined && (
                 <span className="tile-weight">
-                  <span className="tile-prefix">vol:</span>
+                  <span className="tile-icon">📦</span>
                   {w2}
                 </span>
               )}
@@ -218,40 +299,11 @@ function GameScreen({
       </div>
 
       <div className="board-legend">
-        Bigger square = heavier · Deeper blue = more valuable
-        {hasDim2 && ' · vol: pill is the second, independent capacity constraint'}
+        {hasDim2
+          ? 'Bigger square = more volume · Deeper blue = more valuable · ⚖ weight · 📦 volume'
+          : 'Bigger square = heavier · Deeper blue = more valuable'}
         {hasConflict && ' · connector letters mark conflicting items — you can never select both halves of a marked pair'}
       </div>
-
-      {overCapacity && !feedback && (
-        <div className="capacity-warning">
-          {hasDim2 ? 'Over weight or volume capacity — remove some items.' : 'Over capacity — remove some items.'}
-        </div>
-      )}
-      {hasConflictViolation && !feedback && (
-        <div className="capacity-warning conflict-warning">
-          Conflicting items selected — items sharing a connector letter cannot both be chosen.
-        </div>
-      )}
-      {timedOut && !feedback && <div className="time-up-overlay">Time's up — submit your solution.</div>}
-
-      {feedback && (
-        <div className="feedback-panel">
-          <div className={`feedback-title ${feedback.success ? 'success' : 'failure'}`}>
-            {feedback.success ? 'Optimal!' : 'Not optimal'}
-          </div>
-          <div className="feedback-gauge-row">
-            <div className="gauge feedback-gauge">
-              <div
-                className={`gauge-fill${feedback.success ? '' : ' partial'}`}
-                style={{ width: `${optimalityPct}%` }}
-              />
-            </div>
-            <span className="feedback-pct">{optimalityPct}% of optimum</span>
-          </div>
-          <div className="feedback-hint">Gold-ringed tiles are the optimal selection — compare it with yours.</div>
-        </div>
-      )}
 
       <div className="game-actions">
         {feedback ? (
@@ -259,9 +311,20 @@ function GameScreen({
             {isLastRound ? 'See results' : 'Next round'}
           </button>
         ) : (
-          <button type="button" className="submit-button" onClick={onSubmit}>
-            Submit
-          </button>
+          <>
+            <button
+              type="button"
+              className="undo-button"
+              onClick={onUndo}
+              disabled={!canUndo}
+              title="Undo last action (Ctrl+Z)"
+            >
+              ↩ Undo
+            </button>
+            <button type="button" className="submit-button" onClick={onSubmit} disabled={!!pendingWarning}>
+              Submit
+            </button>
+          </>
         )}
       </div>
     </div>

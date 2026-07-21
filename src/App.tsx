@@ -91,6 +91,15 @@ function App() {
   const [timedOut, setTimedOut] = useState(false);
   const startedAtRef = useRef<number>(0);
 
+  // Single-step undo: stores the previous selected[] snapshot so one toggle
+  // can be reverted. Cleared on new round / submit.
+  const [prevSelected, setPrevSelected] = useState<boolean[] | null>(null);
+
+  // Sub-optimal warning: when the setting is on, the first submission of a
+  // non-optimal answer shows a prompt instead of recording the trial.
+  // If the player confirms, the trial is recorded normally.
+  const [pendingWarning, setPendingWarning] = useState(false);
+
   const currentDifficulty = staircase?.difficulty ?? 0;
 
   const spawnProblem = useCallback(
@@ -114,9 +123,11 @@ function App() {
       const solved = solveKnapsack(generateInstance(params, Math.floor(Math.random() * 2 ** 31)));
       setInstance(solved);
       setSelected(new Array(solved.weights.length).fill(false));
+      setPrevSelected(null);
       setTimedOut(false);
       setPhase('playing');
       setLastTrial(null);
+      setPendingWarning(false);
       startedAtRef.current = Date.now();
       setTimeLeftMs(cfg.timeMode === 'timed' ? cfg.timeLimitSeconds * 1000 : null);
     },
@@ -159,12 +170,67 @@ function App() {
     (index: number) => {
       if (phase !== 'playing') return;
       setSelected((prev) => {
+        setPrevSelected(prev); // snapshot for single-step undo
         const next = [...prev];
         next[index] = !next[index];
         return next;
       });
     },
     [phase],
+  );
+
+  const undoLast = useCallback(() => {
+    if (phase !== 'playing' || prevSelected === null) return;
+    setSelected(prevSelected);
+    setPrevSelected(null);
+  }, [phase, prevSelected]);
+
+  // Ctrl+Z / Cmd+Z keyboard shortcut for undo.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undoLast();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [undoLast]);
+
+  // Core submission logic — called either directly (warning off or already
+  // confirmed) or after the player confirms the warning.
+  const recordTrial = useCallback(
+    (feasible: boolean, totalValue: number) => {
+      if (!instance) return;
+      const qualityRatio = feasible && instance.optimalValue > 0 ? totalValue / instance.optimalValue : 0;
+      const success = feasible && qualityRatio >= SUCCESS_QUALITY_THRESHOLD;
+      const timeUsedMs = Date.now() - startedAtRef.current;
+      const timeLimitMs = config.timeMode === 'timed' ? config.timeLimitSeconds * 1000 : null;
+
+      const trial: Trial = {
+        round,
+        difficulty: currentDifficulty,
+        correlation: currentCorrelation,
+        success,
+        qualityRatio,
+        timeUsedMs,
+        timeLimitMs,
+      };
+      setTrials((prev) => [...prev, trial]);
+      setLastTrial(trial);
+      setPhase('feedback');
+      setPrevSelected(null);
+      setPendingWarning(false);
+
+      if (success && config.soundEnabled) playSuccessChime();
+
+      if (config.mode === 'adaptive' && staircase) {
+        const next = updateStaircase(staircase, success);
+        setStaircase(next);
+        saveDifficulty(next.difficulty);
+      }
+    },
+    [instance, round, config, staircase, currentDifficulty, currentCorrelation],
   );
 
   const submit = useCallback(() => {
@@ -181,30 +247,36 @@ function App() {
       conflictOk;
     const qualityRatio = feasible && instance.optimalValue > 0 ? totalValue / instance.optimalValue : 0;
     const success = feasible && qualityRatio >= SUCCESS_QUALITY_THRESHOLD;
-    const timeUsedMs = Date.now() - startedAtRef.current;
-    const timeLimitMs = config.timeMode === 'timed' ? config.timeLimitSeconds * 1000 : null;
 
-    const trial: Trial = {
-      round,
-      difficulty: currentDifficulty,
-      correlation: currentCorrelation,
-      success,
-      qualityRatio,
-      timeUsedMs,
-      timeLimitMs,
-    };
-    setTrials((prev) => [...prev, trial]);
-    setLastTrial(trial);
-    setPhase('feedback');
-
-    if (success && config.soundEnabled) playSuccessChime();
-
-    if (config.mode === 'adaptive' && staircase) {
-      const next = updateStaircase(staircase, success);
-      setStaircase(next);
-      saveDifficulty(next.difficulty);
+    // If the warning setting is on and the solution is sub-optimal, pause and
+    // show the warning prompt instead of recording immediately. The player can
+    // go back to adjust or confirm the submission as-is.
+    if (config.subOptimalWarning && !success && !pendingWarning) {
+      setPendingWarning(true);
+      return;
     }
-  }, [instance, selected, round, config, staircase, currentDifficulty, currentCorrelation, phase]);
+
+    recordTrial(feasible, totalValue);
+  }, [instance, selected, phase, config, pendingWarning, recordTrial]);
+
+  const dismissWarningAndSubmit = useCallback(() => {
+    if (!instance) return;
+    const totalWeight = selected.reduce((s, on, i) => (on ? s + instance.weights[i] : s), 0);
+    const totalValue = selected.reduce((s, on, i) => (on ? s + instance.values[i] : s), 0);
+    const totalWeight2 = instance.weights2
+      ? selected.reduce((s, on, i) => (on ? s + instance.weights2![i] : s), 0)
+      : 0;
+    const conflictOk = !instance.conflicts || instance.conflicts.every(([a, b]) => !(selected[a] && selected[b]));
+    const feasible =
+      totalWeight <= instance.capacity &&
+      (instance.capacity2 === undefined || totalWeight2 <= instance.capacity2) &&
+      conflictOk;
+    recordTrial(feasible, totalValue);
+  }, [instance, selected, recordTrial]);
+
+  const dismissWarningAndContinue = useCallback(() => {
+    setPendingWarning(false);
+  }, []);
 
   const nextRound = useCallback(() => {
     if (round + 1 >= config.rounds) {
@@ -245,6 +317,8 @@ function App() {
             instance={instance}
             selected={selected}
             onToggle={toggleItem}
+            onUndo={undoLast}
+            canUndo={prevSelected !== null && phase === 'playing'}
             onSubmit={submit}
             onNext={nextRound}
             feedback={phase === 'feedback' ? lastTrial : null}
@@ -255,6 +329,9 @@ function App() {
             config={config}
             difficulty={currentDifficulty}
             correlation={currentCorrelation}
+            pendingWarning={pendingWarning}
+            onWarningConfirm={dismissWarningAndSubmit}
+            onWarningDismiss={dismissWarningAndContinue}
           />
         )}
 
