@@ -105,8 +105,6 @@ function GameScreen({
   }
   const hasConflictViolation = violatingIndices.size > 0;
 
-  const minW = Math.min(...instance.weights);
-  const maxW = Math.max(...instance.weights);
   const minV = Math.min(...instance.values);
   const maxV = Math.max(...instance.values);
 
