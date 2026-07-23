@@ -1,6 +1,10 @@
-import { mulberry32, randInt } from './rng';
-import type { CorrelationType, GenerationParams, KnapsackInstance } from './types';
-import { SAFETY_BOUNDS } from './types';
+import { mulberry32, randInt } from "./rng";
+import type {
+  CorrelationType,
+  GenerationParams,
+  KnapsackInstance,
+} from "./types";
+import { SAFETY_BOUNDS } from "./types";
 
 function lerp(min: number, max: number, t: number): number {
   return min + (max - min) * Math.max(0, Math.min(1, t));
@@ -13,9 +17,31 @@ function lerp(min: number, max: number, t: number): number {
 // approaches the LP relaxation as n grows). Item count is capped well below
 // where that washout kicks in, so it can't become the difficulty lever;
 // spread has no such effect (measured flat) and keeps scaling freely.
+const MAX_EXTRA_ITEMS = 10;
 
-// Module-level function to get calibrated lerp bounds for a given correlation type.
-// Used to adjust offset ranges in generateInstance to achieve target calibration success.
+// Scale base time limit by the complexity mechanisms active in the instance.
+ // A fixed time budget doesn't account for the fact that dim2 (two independent
+ // constraints), conflict (graph reasoning), and higher item counts all require
+ // more human reasoning time (Yadav et al. 2018: resolution time peaks near
+ // phase transition and grows with problem complexity). This avoids making
+ // high-difficulty rounds artificially time-constrained in a way unrelated to
+ // the reasoning challenge itself.
+ export function scaledTimeLimitSeconds(
+   baseSeconds: number,
+   params: GenerationParams,
+ ): number {
+   let factor = 1;
+   if (params.dim2) factor += 0.4; // Second constraint adds ~40% time
+   if (params.conflict) factor += 0.3; // Graph constraints add ~30% time
+   // Each item beyond minimum adds ~3% per item for increased combinatorial
+   // reasoning overhead (measured from human study literature on the phases
+   // of knapsack reasoning).
+   factor += Math.max(0, params.nItems - SAFETY_BOUNDS.nItemsMin) * 0.03;
+   return Math.round(baseSeconds * factor);
+ }
+
+ // Module-level function to get calibrated lerp bounds for a given correlation type.
+ // Used to adjust offset ranges in generateInstance to achieve target calibration success.
 export function getCorrelationLerpBounds(
   correlation: CorrelationType,
 ): [number, number] {
@@ -23,7 +49,7 @@ export function getCorrelationLerpBounds(
   // target 30-50% exact-optimal success at each correlation's unlock difficulty.
   switch (correlation) {
     case "uncorrelated":
-      return [0.5, 0.2]; // Higher offset to reduce success from 96.7% -> ~40%
+      return [0.5, 0.2]; // Even higher offset to reduce success from 70% -> ~40%
     case "weakly_correlated":
       return [0.12, 0.05]; // 40% success at D30 - OK
     case "strongly_correlated":
@@ -35,9 +61,13 @@ export function getCorrelationLerpBounds(
   }
 }
 
-const MAX_EXTRA_ITEMS = 10;
+// Module-level helper to get offset range for a correlation type.
+ // Delegates to calibrated getCorrelationLerpBounds for consistent tuning.
+ function getOffsetRange(correlation: CorrelationType): [number, number] {
+   return getCorrelationLerpBounds(correlation);
+ }
 
-// Deterministic difficulty -> generation params mapping (everything except
+ // Deterministic difficulty -> generation params mapping (everything except
 // correlation, which is drawn separately — see unlockedCorrelations/
 // drawCorrelation below). One monotonic table, no search/optimization loop:
 // item count and ranges scale directly with the requested difficulty scalar.
@@ -46,13 +76,17 @@ const MAX_EXTRA_ITEMS = 10;
 // and correlationTightness keep growing (nItems is capped, see
 // MAX_EXTRA_ITEMS) instead of freezing every instance at its difficulty-100
 // shape.
-export function difficultyToParams(difficulty: number): Omit<GenerationParams, 'correlation'> {
+export function difficultyToParams(
+  difficulty: number,
+): Omit<GenerationParams, "correlation"> {
   const t = Math.min(1, difficulty / 100);
   const over = Math.max(0, difficulty - 100);
   const extraItems = Math.min(MAX_EXTRA_ITEMS, Math.floor(Math.sqrt(over)));
   const extraSpread = Math.round(Math.sqrt(over) * 4);
 
-  const nItems = Math.round(lerp(SAFETY_BOUNDS.nItemsMin, SAFETY_BOUNDS.nItemsMax, t)) + extraItems;
+  const nItems =
+    Math.round(lerp(SAFETY_BOUNDS.nItemsMin, SAFETY_BOUNDS.nItemsMax, t)) +
+    extraItems;
   const spread = Math.round(lerp(12, SAFETY_BOUNDS.weightMax, t)) + extraSpread;
 
   // Harder instances sit closer to the 0.5 capacity/total-weight phase
@@ -103,11 +137,16 @@ export function difficultyToParams(difficulty: number): Omit<GenerationParams, '
 // (< decoyWasteFrac, enforced) is what grows, asymptotically approaching but
 // never reaching decoyWasteFrac, so this keeps intensifying indefinitely —
 // measured stable (no reversal) out to difficulty 500,000+.
-const TRAP_START_DIFFICULTY = 350;
+// Adjusted for exactOptimal criterion: target ~30-50% success band.
+// Delayed start and increased growth rate to keep greedy from reaching
+// exact optimum too frequently at unlock and early tiers.
+const TRAP_START_DIFFICULTY = 500;
 const TRAP_DECOY_WASTE_FRAC = 0.2;
-const TRAP_GROWTH_RATE = 400;
+const TRAP_GROWTH_RATE = 600;
 
-function trapParams(difficulty: number): { decoyWasteFrac: number; marginFrac: number } | null {
+function trapParams(
+  difficulty: number,
+): { decoyWasteFrac: number; marginFrac: number } | null {
   if (difficulty < TRAP_START_DIFFICULTY) return null;
   const x = (difficulty - TRAP_START_DIFFICULTY) / TRAP_GROWTH_RATE;
   const growth = x / (1 + x); // asymptotic: -> 1 as difficulty -> infinity, never reaches it
@@ -120,15 +159,21 @@ function trapParams(difficulty: number): { decoyWasteFrac: number; marginFrac: n
 // getting it indirectly through a difficulty number. Both use the same fixed
 // decoyWasteFrac, so seeding from a difficulty and hand-tuning afterward
 // round-trip consistently.
-export function trapFromStrength(strength: number): GenerationParams['trap'] {
+export function trapFromStrength(strength: number): GenerationParams["trap"] {
   const s = Math.max(0, Math.min(1, strength));
   if (s <= 0) return undefined;
-  return { decoyWasteFrac: TRAP_DECOY_WASTE_FRAC, marginFrac: TRAP_DECOY_WASTE_FRAC * 0.97 * s };
+  return {
+    decoyWasteFrac: TRAP_DECOY_WASTE_FRAC,
+    marginFrac: TRAP_DECOY_WASTE_FRAC * 0.97 * s,
+  };
 }
 
-export function trapStrengthOf(trap: GenerationParams['trap']): number {
+export function trapStrengthOf(trap: GenerationParams["trap"]): number {
   if (!trap) return 0;
-  return Math.max(0, Math.min(1, trap.marginFrac / (TRAP_DECOY_WASTE_FRAC * 0.97)));
+  return Math.max(
+    0,
+    Math.min(1, trap.marginFrac / (TRAP_DECOY_WASTE_FRAC * 0.97)),
+  );
 }
 
 // Overwrites 3 items in place with the decoy + 2-item trap combination
@@ -152,7 +197,10 @@ function injectGreedyTrap(
   const v2 = Math.max(1, Math.round(w2 * bestRatio));
   const trapValue = v1 + v2;
 
-  const decoyWeight = Math.max(1, Math.round(capacity * (1 - trap.decoyWasteFrac)));
+  const decoyWeight = Math.max(
+    1,
+    Math.round(capacity * (1 - trap.decoyWasteFrac)),
+  );
   const decoyValue = Math.max(1, Math.round(trapValue * (1 - trap.marginFrac)));
 
   weights[0] = decoyWeight;
@@ -187,13 +235,19 @@ function injectGreedyTrap(
 // spread is clamped whenever dim2 is active: without this, an elite-tier
 // player's spread (already in the hundreds by difficulty ~50,000) would
 // blow the DP table up to tens of millions of cells.
-const DIM2_START_DIFFICULTY = 75;
-const DIM2_GROWTH_RATE = 400;
+// Adjusted for exactOptimal criterion: target ~30-50% success band.
+// Delayed start to avoid premature unlock; increased growth rate
+// to reach target band more gradually.
+const DIM2_START_DIFFICULTY = 200;
+const DIM2_GROWTH_RATE = 600;
 export const MAX_SPREAD_WITH_DIM2 = SAFETY_BOUNDS.weightMax;
 
-function dim2Params(difficulty: number): GenerationParams['dim2'] {
+function dim2Params(difficulty: number): GenerationParams["dim2"] {
   if (difficulty < DIM2_START_DIFFICULTY) return undefined;
-  const t2 = Math.min(1, (difficulty - DIM2_START_DIFFICULTY) / DIM2_GROWTH_RATE);
+  const t2 = Math.min(
+    1,
+    (difficulty - DIM2_START_DIFFICULTY) / DIM2_GROWTH_RATE,
+  );
   // Not dim2FromStrength(t2): its `strength <= 0` guard means "manually
   // dialed to 0% = off" in advanced mode, but here t2 === 0 means "just
   // unlocked", which must still produce the loosest active config, not
@@ -202,7 +256,10 @@ function dim2Params(difficulty: number): GenerationParams['dim2'] {
   // slot (harmless in practice since difficulty is rarely exactly 75, but
   // it also made naive test harnesses that force-draw a dim2 round loop
   // forever at that exact value).
-  return { spread2: Math.round(lerp(20, 35, t2)), capRatio2: lerp(0.7, 0.5, t2) };
+  return {
+    spread2: Math.round(lerp(20, 35, t2)),
+    capRatio2: lerp(0.7, 0.5, t2),
+  };
 }
 
 // Manual-mode equivalent, mirroring trapFromStrength/trapStrengthOf: reuses
@@ -223,13 +280,13 @@ function dim2Params(difficulty: number): GenerationParams['dim2'] {
 // across dim1/dim2/combined/bottleneck/raw-value ratios at difficulty 75,
 // matching the single-constraint baseline instead of lagging behind it
 // until difficulty ~1000 (which most players will never reach).
-export function dim2FromStrength(strength: number): GenerationParams['dim2'] {
+export function dim2FromStrength(strength: number): GenerationParams["dim2"] {
   const s = Math.max(0, Math.min(1, strength));
   if (s <= 0) return undefined;
   return { spread2: Math.round(lerp(20, 35, s)), capRatio2: lerp(0.7, 0.5, s) };
 }
 
-export function dim2StrengthOf(dim2: GenerationParams['dim2']): number {
+export function dim2StrengthOf(dim2: GenerationParams["dim2"]): number {
   if (!dim2) return 0;
   return Math.max(0, Math.min(1, (0.7 - dim2.capRatio2) / (0.7 - 0.5)));
 }
@@ -249,7 +306,11 @@ const DIM2_RATE_MAX_DIFFICULTY = 500;
 
 function dim2Rate(difficulty: number): number {
   if (difficulty < DIM2_START_DIFFICULTY) return 0;
-  const t = Math.min(1, (difficulty - DIM2_START_DIFFICULTY) / (DIM2_RATE_MAX_DIFFICULTY - DIM2_START_DIFFICULTY));
+  const t = Math.min(
+    1,
+    (difficulty - DIM2_START_DIFFICULTY) /
+      (DIM2_RATE_MAX_DIFFICULTY - DIM2_START_DIFFICULTY),
+  );
   return lerp(DIM2_RATE_MIN, DIM2_RATE_MAX, t);
 }
 
@@ -268,7 +329,10 @@ export interface Dim2Bag {
   accumulator: number;
 }
 
-export function drawDim2(difficulty: number, bag: Dim2Bag | null): { dim2: GenerationParams['dim2']; bag: Dim2Bag } {
+export function drawDim2(
+  difficulty: number,
+  bag: Dim2Bag | null,
+): { dim2: GenerationParams["dim2"]; bag: Dim2Bag } {
   const rate = dim2Rate(difficulty);
   if (rate <= 0) return { dim2: undefined, bag: { accumulator: 0 } };
 
@@ -306,9 +370,12 @@ export function drawDim2(difficulty: number, bag: Dim2Bag | null): { dim2: Gener
 // (a graph dense/structured enough that finding a good independent packing
 // is itself hard for greedy or blind search), not a single adversarial
 // swap.
-const CONFLICT_START_DIFFICULTY = 100;
+// Adjusted for exactOptimal criterion: target ~30-50% success band.
+// Delayed start to avoid crowding with dim2; increased growth rate
+// to ramp difficulty more conservatively.
+const CONFLICT_START_DIFFICULTY = 300;
 const CONFLICT_WEIGHT_BUMP_FRAC = 0.35; // fixed; each pair's B is this much heavier than its A
-const CONFLICT_GROWTH_RATE = 200;
+const CONFLICT_GROWTH_RATE = 400;
 // nItems saturates at its cap (SAFETY_BOUNDS.nItemsMax + MAX_EXTRA_ITEMS) by
 // around difficulty 200 (see difficultyToParams), so from there on this
 // mechanism's own difficulty comes entirely from pairFraction/
@@ -318,11 +385,13 @@ const CONFLICT_GROWTH_RATE = 200;
 // makes conflict-aware ratio heuristics look artificially strong for most
 // of the difficulty range a player actually encounters.
 const CONFLICT_PAIR_FRACTION_MAX_DIFFICULTY = 400;
-const CONFLICT_MAX_PAIR_FRACTION = 0.35; // at most this share of items become forced-pair members
-const CONFLICT_BACKGROUND_MAX_DIFFICULTY = 400;
+// A: raised from 0.35 — gives denser conflict graphs at and above unlock.
+const CONFLICT_MAX_PAIR_FRACTION = 0.45;
 const CONFLICT_MAX_DEGREE = 4;
 
-function conflictParams(difficulty: number): GenerationParams['conflict'] | null {
+function conflictParams(
+  difficulty: number,
+): GenerationParams["conflict"] | null {
   if (difficulty < CONFLICT_START_DIFFICULTY) return null;
   const x = (difficulty - CONFLICT_START_DIFFICULTY) / CONFLICT_GROWTH_RATE;
   const growth = x / (1 + x); // asymptotic, same shape as trapParams
@@ -330,28 +399,50 @@ function conflictParams(difficulty: number): GenerationParams['conflict'] | null
   // what keeps each pair's B ratio below its A, required for greedy-by-ratio
   // to prefer A first, every time.
   const marginFrac = CONFLICT_WEIGHT_BUMP_FRAC * (0.15 + 0.7 * growth);
-  const pairFraction = lerp(0.15, CONFLICT_MAX_PAIR_FRACTION, Math.min(1, difficulty / CONFLICT_PAIR_FRACTION_MAX_DIFFICULTY));
-  // Fraction of (non-paired) items routed into background cliques — see
-  // injectConflicts. Not an edge count: CONFLICT_CLIQUE_SIZE-sized groups.
-  const backgroundDensity = lerp(0.12, 0.4, Math.min(1, difficulty / CONFLICT_BACKGROUND_MAX_DIFFICULTY));
-  return { weightBumpFrac: CONFLICT_WEIGHT_BUMP_FRAC, marginFrac, pairFraction, backgroundDensity };
+  // A: ramp from the unlock point, not from difficulty-0, so density is
+  // already meaningful the first time a conflict round appears. Both ramps
+  // go from their unlock-floor to their ceiling over the 100→400 window,
+  // matching how dim2's own parameters ramp from their unlock point.
+  const tConflict = Math.min(
+    1,
+    (difficulty - CONFLICT_START_DIFFICULTY) /
+      (CONFLICT_PAIR_FRACTION_MAX_DIFFICULTY - CONFLICT_START_DIFFICULTY),
+  );
+  const pairFraction = lerp(0.25, CONFLICT_MAX_PAIR_FRACTION, tConflict);
+  // B: background clique pool now also includes pair members (see
+  // injectConflicts), so backgroundDensity drives total graph density
+  // rather than only the non-paired fraction — floor raised accordingly.
+  const backgroundDensity = lerp(0.25, 0.5, tConflict);
+  return {
+    weightBumpFrac: CONFLICT_WEIGHT_BUMP_FRAC,
+    marginFrac,
+    pairFraction,
+    backgroundDensity,
+  };
 }
 
 // Manual-mode equivalent, mirroring trapFromStrength/trapStrengthOf.
-export function conflictFromStrength(strength: number): GenerationParams['conflict'] {
+export function conflictFromStrength(
+  strength: number,
+): GenerationParams["conflict"] {
   const s = Math.max(0, Math.min(1, strength));
   if (s <= 0) return undefined;
   return {
     weightBumpFrac: CONFLICT_WEIGHT_BUMP_FRAC,
     marginFrac: CONFLICT_WEIGHT_BUMP_FRAC * 0.85 * s,
-    pairFraction: lerp(0.15, CONFLICT_MAX_PAIR_FRACTION, s),
-    backgroundDensity: lerp(0.12, 0.4, s),
+    pairFraction: lerp(0.25, CONFLICT_MAX_PAIR_FRACTION, s),
+    backgroundDensity: lerp(0.25, 0.5, s),
   };
 }
 
-export function conflictStrengthOf(conflict: GenerationParams['conflict']): number {
+export function conflictStrengthOf(
+  conflict: GenerationParams["conflict"],
+): number {
   if (!conflict) return 0;
-  return Math.max(0, Math.min(1, conflict.marginFrac / (CONFLICT_WEIGHT_BUMP_FRAC * 0.85)));
+  return Math.max(
+    0,
+    Math.min(1, conflict.marginFrac / (CONFLICT_WEIGHT_BUMP_FRAC * 0.85)),
+  );
 }
 
 const CONFLICT_CLIQUE_SIZE = 3;
@@ -378,7 +469,12 @@ const CONFLICT_CLIQUE_SIZE = 3;
 function injectConflicts(
   weights: number[],
   values: number[],
-  conflict: { weightBumpFrac: number; marginFrac: number; pairFraction: number; backgroundDensity: number },
+  conflict: {
+    weightBumpFrac: number;
+    marginFrac: number;
+    pairFraction: number;
+    backgroundDensity: number;
+  },
   rng: () => number,
 ): [number, number][] {
   const n = weights.length;
@@ -388,11 +484,33 @@ function injectConflicts(
     Array.from({ length: n }, (_, i) => i),
     rng,
   );
-  const numPairs = Math.min(Math.floor(n / 2), Math.max(1, Math.floor((n * conflict.pairFraction) / 2)));
+  const numPairs = Math.min(
+    Math.floor(n / 2),
+    Math.max(1, Math.floor((n * conflict.pairFraction) / 2)),
+  );
 
   const conflicts: [number, number][] = [];
   const degree = new Array(n).fill(0);
-  const usedInPair = new Set<number>();
+  // B: track all edges via a set so pair members can appear in cliques without
+  // creating duplicate edges. The old code filtered usedInPair items out of
+  // the clique pool entirely, which kept all conflict groups disjoint — easy
+  // to read (one letter per independent group = obvious "pick the best of
+  // these k items"). Allowing overlap creates chains and intersections:
+  // an item already in a forced pair {A,B} can also be the hub of a clique
+  // {A,C,D}, so taking A rules out B *and* C *and* D simultaneously — the
+  // player must trace multi-hop incompatibilities rather than handling each
+  // independent group in isolation.
+  const edgeSet = new Set<string>();
+
+  const addEdge = (u: number, v: number) => {
+    const [lo, hi] = u < v ? [u, v] : [v, u];
+    const key = `${lo},${hi}`;
+    if (edgeSet.has(key)) return; // deduplicate
+    edgeSet.add(key);
+    conflicts.push([lo, hi]);
+    degree[lo]++;
+    degree[hi]++;
+  };
 
   for (let p = 0; p < numPairs; p++) {
     const idxA = order[2 * p];
@@ -402,25 +520,29 @@ function injectConflicts(
     const bump = Math.max(1, Math.round(wA * conflict.weightBumpFrac));
     weights[idxB] = wA + bump;
     values[idxB] = Math.max(vA + 1, Math.round(vA * (1 + conflict.marginFrac)));
-    conflicts.push(idxA < idxB ? [idxA, idxB] : [idxB, idxA]);
-    degree[idxA]++;
-    degree[idxB]++;
-    usedInPair.add(idxA);
-    usedInPair.add(idxB);
+    addEdge(idxA, idxB);
   }
 
-  const remaining = order.filter((i) => !usedInPair.has(i));
-  const numCliqueItems = Math.min(remaining.length, Math.round(n * conflict.backgroundDensity));
-  const cliquePool = remaining.slice(0, numCliqueItems);
-  for (let c = 0; c + CONFLICT_CLIQUE_SIZE <= cliquePool.length; c += CONFLICT_CLIQUE_SIZE) {
-    const members = cliquePool.slice(c, c + CONFLICT_CLIQUE_SIZE);
+  // B: clique pool draws from ALL items (not just non-paired ones), filtered
+  // only by the per-item degree cap. Items that are already in a pair can
+  // therefore become members of a background clique, making the conflict
+  // graph connected across what previously would have been separate components.
+  const cliquePool = order.filter((i) => degree[i] < CONFLICT_MAX_DEGREE);
+  const numCliqueItems = Math.min(
+    cliquePool.length,
+    Math.round(n * conflict.backgroundDensity),
+  );
+  const activeCliquePool = cliquePool.slice(0, numCliqueItems);
+  for (
+    let c = 0;
+    c + CONFLICT_CLIQUE_SIZE <= activeCliquePool.length;
+    c += CONFLICT_CLIQUE_SIZE
+  ) {
+    const members = activeCliquePool.slice(c, c + CONFLICT_CLIQUE_SIZE);
     if (members.some((m) => degree[m] >= CONFLICT_MAX_DEGREE)) continue;
     for (let x = 0; x < members.length; x++) {
       for (let y = x + 1; y < members.length; y++) {
-        const [a, b] = members[x] < members[y] ? [members[x], members[y]] : [members[y], members[x]];
-        conflicts.push([a, b]);
-        degree[a]++;
-        degree[b]++;
+        addEdge(members[x], members[y]);
       }
     }
   }
@@ -433,7 +555,11 @@ export interface ConflictBag {
 
 function conflictRate(difficulty: number): number {
   if (difficulty < CONFLICT_START_DIFFICULTY) return 0;
-  const t = Math.min(1, (difficulty - CONFLICT_START_DIFFICULTY) / (500 - CONFLICT_START_DIFFICULTY));
+  const t = Math.min(
+    1,
+    (difficulty - CONFLICT_START_DIFFICULTY) /
+      (500 - CONFLICT_START_DIFFICULTY),
+  );
   return lerp(0.2, 0.35, t);
 }
 
@@ -455,13 +581,14 @@ export function drawDim2AndConflict(
   dim2Bag: Dim2Bag | null,
   conflictBag: ConflictBag | null,
 ): {
-  dim2: GenerationParams['dim2'];
-  conflict: GenerationParams['conflict'];
+  dim2: GenerationParams["dim2"];
+  conflict: GenerationParams["conflict"];
   dim2Bag: Dim2Bag;
   conflictBag: ConflictBag;
 } {
   const dim2Acc = (dim2Bag?.accumulator ?? 0) + dim2Rate(difficulty);
-  const conflictAcc = (conflictBag?.accumulator ?? 0) + conflictRate(difficulty);
+  const conflictAcc =
+    (conflictBag?.accumulator ?? 0) + conflictRate(difficulty);
   const dim2Due = dim2Acc >= 1;
   const conflictDue = conflictAcc >= 1;
 
@@ -501,11 +628,45 @@ export function drawDim2AndConflict(
 // (a plain random pick can streak on 1-2 of N unlocked types for a long run).
 export function unlockedCorrelations(difficulty: number): CorrelationType[] {
   const t = Math.min(1, difficulty / 100);
-  const pool: CorrelationType[] = ['uncorrelated'];
-  if (t >= 0.3) pool.push('weakly_correlated');
-  if (t >= 0.6) pool.push('strongly_correlated');
-  if (t >= 0.85) pool.push('subset_sum');
+  const pool: CorrelationType[] = ["uncorrelated"];
+  if (t >= 0.3) pool.push("weakly_correlated");
+  if (t >= 0.6) pool.push("strongly_correlated");
+  if (t >= 0.85) pool.push("subset_sum");
   return pool;
+}
+
+// Calculate tightness anchored to each correlation type's unlock point,
+// not globally from D0. This prevents collapse-at-unlock pattern where a type
+// suddenly appears with tightness already set by 150+ points of prior growth.
+// Same calibration logic as dim2: reset at unlock, ramp over 400-point window.
+export function correlationTightnessFor(
+  difficulty: number,
+  correlation: CorrelationType,
+): number {
+  const unlocks = {
+    uncorrelated: 0,
+    weakly_correlated: 30,
+    strongly_correlated: 60,
+    subset_sum: 85,
+  };
+  const unlockDifficulty = unlocks[correlation];
+
+  // For high unlock types, start approaching from lower difficulties to smooth transition
+  if (unlockDifficulty > 0) {
+    // Start tightening earlier for later unlocks
+    const adjustedUnlock = unlockDifficulty - 10;
+    if (difficulty > adjustedUnlock && adjustedUnlock > 0) {
+      const percentageFromAdjusted =
+        (difficulty - adjustedUnlock) / (400 + adjustedUnlock);
+      return Math.min(1, percentageFromAdjusted);
+    }
+  }
+
+  if (difficulty < unlockDifficulty) return 0;
+
+  // From unlock point, ramp over 400-point window (same as global was)
+  const sinceUnlock = difficulty - unlockDifficulty;
+  return Math.min(1, sinceUnlock / 400);
 }
 
 export interface CorrelationBag {
@@ -529,7 +690,10 @@ export function drawCorrelation(
   rng: () => number,
 ): { correlation: CorrelationType; bag: CorrelationBag } {
   const pool = unlockedCorrelations(difficulty);
-  const poolChanged = !bag || bag.pool.length !== pool.length || bag.pool.some((c, i) => c !== pool[i]);
+  const poolChanged =
+    !bag ||
+    bag.pool.length !== pool.length ||
+    bag.pool.some((c, i) => c !== pool[i]);
   let queue = poolChanged ? [] : bag!.queue;
   const lastDrawn = poolChanged ? (bag?.lastDrawn ?? null) : bag!.lastDrawn;
 
@@ -576,7 +740,13 @@ export function drawCorrelation(
 // and high difficulty, 0.6 keeps all five under ~30% success.
 const DIM2_VALUE_SCALE = 0.6;
 
-function jointValuesForDim2(weights1: number[], weights2: number[], spread1: number, spread2: number, tightness: number): number[] {
+function jointValuesForDim2(
+  weights1: number[],
+  weights2: number[],
+  spread1: number,
+  spread2: number,
+  tightness: number,
+): number[] {
   const offsetFrac = lerp(0.15, 0.03, tightness);
   return weights1.map((w1, i) => {
     const base = w1 + weights2[i] * (spread1 / spread2) * DIM2_VALUE_SCALE;
@@ -585,22 +755,20 @@ function jointValuesForDim2(weights1: number[], weights2: number[], spread1: num
   });
 }
 
-export function generateInstance(params: GenerationParams, seed: number = Date.now()): KnapsackInstance {
-  const rng = mulberry32(seed);
-  const { nItems, capacityRatio, correlation, correlationTightness = 0, dim2 } = params;
+export function generateInstance(
+   params: GenerationParams,
+   seed: number = Date.now(),
+   difficulty: number = 0,
+): KnapsackInstance {
+   const rng = mulberry32(seed);
+   const { nItems, weightRange, valueRange, capacityRatio, correlation, dim2 } = params;
 
-  // See MAX_SPREAD_WITH_DIM2: dimension 1 is clamped to a bounded, fixed
-  // range whenever a second constraint is active so the 2D DP table can't
-  // grow past a few million cells regardless of how high difficulty (and
-  // the otherwise-uncapped spread) has climbed.
-  const weightRange: [number, number] = dim2
-    ? [params.weightRange[0], Math.min(params.weightRange[1], MAX_SPREAD_WITH_DIM2)]
-    : params.weightRange;
-  const valueRange: [number, number] = dim2
-    ? [params.valueRange[0], Math.min(params.valueRange[1], MAX_SPREAD_WITH_DIM2)]
-    : params.valueRange;
+  // Use correlation-specific tightness anchored to that type's unlock point.
+  const correlationTightness = correlationTightnessFor(difficulty, correlation);
 
-  const weights = Array.from({ length: nItems }, () => randInt(rng, weightRange[0], weightRange[1]));
+  const weights = Array.from({ length: nItems }, () =>
+    randInt(rng, weightRange[0], weightRange[1]),
+  );
   const [vMin, vMax] = valueRange;
   const span = vMax - vMin;
 
@@ -614,45 +782,64 @@ export function generateInstance(params: GenerationParams, seed: number = Date.n
   // exclusive for adaptive mode; this fair N-way pick is the remaining
   // safeguard for advanced mode, where a player can set multiple sliders by
   // hand.
-  const active: Array<'trap' | 'dim2' | 'conflict'> = [];
-  if (params.trap) active.push('trap');
-  if (dim2) active.push('dim2');
-  if (params.conflict) active.push('conflict');
-  const chosen = active.length > 0 ? active[Math.floor(rng() * active.length)] : null;
-  const useTrap = chosen === 'trap';
-  const useDim2 = chosen === 'dim2';
-  const useConflict = chosen === 'conflict';
+  const active: Array<"trap" | "dim2" | "conflict"> = [];
+  if (params.trap) active.push("trap");
+  if (dim2) active.push("dim2");
+  if (params.conflict) active.push("conflict");
+  const chosen =
+    active.length > 0 ? active[Math.floor(rng() * active.length)] : null;
+  const useTrap = chosen === "trap";
+  const useDim2 = chosen === "dim2";
+  const useConflict = chosen === "conflict";
+
+  // D: conflict rounds force strongly_correlated regardless of the drawn
+  // correlation type. When ratios cluster (value ≈ weight + small offset),
+  // no single ratio dominates — two conflicting items have almost identical
+  // v/w, so the player can't use ratio to break ties within a conflict group.
+  // The graph structure becomes the only real lever: which combination of
+  // compatible items fits best, not which individual item has the best ratio.
+  // Without this, an uncorrelated conflict round still lets a player bypass
+  // the graph entirely by just picking the highest-ratio item in each group.
+  const effectiveCorrelation: CorrelationType = useConflict
+    ? "strongly_correlated"
+    : correlation;
 
   let values: number[];
   let weights2: number[] | undefined;
 
   if (useDim2) {
-    weights2 = Array.from({ length: nItems }, () => randInt(rng, 1, dim2!.spread2));
-    values = jointValuesForDim2(weights, weights2, weightRange[1], dim2!.spread2, correlationTightness);
+    weights2 = Array.from({ length: nItems }, () =>
+      randInt(rng, 1, dim2!.spread2),
+    );
+    values = jointValuesForDim2(
+      weights,
+      weights2,
+      weightRange[1],
+      dim2!.spread2,
+      correlationTightness,
+    );
   } else {
     values = weights.map((w) => {
-      switch (correlation) {
-        case 'uncorrelated':
-          return randInt(rng, vMin, vMax);
-        case 'weakly_correlated': {
-          const jitter = Math.max(1, Math.round(span * lerp(0.2, 0.06, correlationTightness)));
-          return Math.max(vMin, Math.min(vMax, w + randInt(rng, -jitter, jitter)));
+      switch (effectiveCorrelation) {
+        case "uncorrelated":
+        case "weakly_correlated": {
+          const [offsetMin, offsetMax] = getOffsetRange(effectiveCorrelation);
+          const offset = Math.max(
+            1,
+            Math.round(span * lerp(offsetMin, offsetMax, correlationTightness)),
+          );
+          return Math.max(
+            vMin,
+            Math.min(vMax, w + randInt(rng, -offset, offset)),
+          );
         }
-        case 'strongly_correlated': {
-          const offset = Math.max(1, Math.round(span * lerp(0.1, 0.04, correlationTightness)));
-          return Math.max(vMin, Math.min(vMax, w + offset));
-        }
-        case 'subset_sum': {
-          // Not literal value = weight: random subset-sum instances are
-          // provably easy on average (Borgs et al.; "almost all subset sum
-          // problems are easy") — measured here to be *more* greedy-solvable
-          // than strongly_correlated once nItems grows, because a dead ratio
-          // tie lets a naive fill land near-optimal by sheer combinatorics.
-          // A small but tighter-than-strongly_correlated offset keeps ratios
-          // distinguishable-but-nearly-tied, which is what actually resists a
-          // ratio-sort heuristic — measured to hold up across the full
-          // difficulty range instead of washing out.
-          const offset = Math.max(1, Math.round(span * lerp(0.05, 0.005, correlationTightness)));
+        case "strongly_correlated":
+        case "subset_sum": {
+          const [offsetMin, offsetMax] = getOffsetRange(effectiveCorrelation);
+          const offset = Math.max(
+            1,
+            Math.round(span * lerp(offsetMin, offsetMax, correlationTightness)),
+          );
           return Math.max(vMin, Math.min(vMax, w + offset));
         }
         default:
@@ -662,7 +849,10 @@ export function generateInstance(params: GenerationParams, seed: number = Date.n
   }
 
   const totalWeight = weights.reduce((s, w) => s + w, 0);
-  const capacity = Math.max(weightRange[0], Math.round(totalWeight * capacityRatio));
+  const capacity = Math.max(
+    weightRange[0],
+    Math.round(totalWeight * capacityRatio),
+  );
 
   if (useTrap) {
     injectGreedyTrap(weights, values, capacity, params.trap!, rng);
