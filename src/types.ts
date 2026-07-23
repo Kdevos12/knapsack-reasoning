@@ -97,6 +97,9 @@ export interface Trial {
   difficulty: number;
   correlation: CorrelationType;
   success: boolean;
+  // Mirrors Murawski & Bossaerts: separate "computational performance"
+  // (exactOptimal) from "economic performance" (qualityRatio).
+  exactOptimal: boolean; // true iff the submitted selection reaches optimalValue
   qualityRatio: number; // achievedValue / optimalValue, in [0,1]
   timeUsedMs: number;
   timeLimitMs: number | null;

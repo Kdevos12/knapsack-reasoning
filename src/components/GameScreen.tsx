@@ -23,6 +23,8 @@ interface GameScreenProps {
   pendingWarning: boolean;
   onWarningConfirm: () => void;
   onWarningDismiss: () => void;
+  // Which special mechanism this round used (for pedagogical hints)
+  mechanism: 'none' | 'trap' | 'dim2' | 'conflict';
 }
 
 // Tile encoding follows Murawski & Bossaerts (2016, Sci. Rep.): tile size
@@ -51,6 +53,7 @@ function GameScreen({
   pendingWarning,
   onWarningConfirm,
   onWarningDismiss,
+  mechanism,
 }: GameScreenProps) {
   const totalWeight = selected.reduce((s, on, i) => (on ? s + instance.weights[i] : s), 0);
   const totalValue = selected.reduce((s, on, i) => (on ? s + instance.values[i] : s), 0);
@@ -105,8 +108,6 @@ function GameScreen({
   }
   const hasConflictViolation = violatingIndices.size > 0;
 
-  const minW = Math.min(...instance.weights);
-  const maxW = Math.max(...instance.weights);
   const minV = Math.min(...instance.values);
   const maxV = Math.max(...instance.values);
 
@@ -210,6 +211,17 @@ function GameScreen({
             <span className="feedback-pct">{optimalityPct}% of optimum</span>
           </div>
           <div className="feedback-hint">Gold-ringed tiles are the optimal selection — compare it with yours.</div>
+          {/* Pedagogical hint for trap rounds: explain greedy-decoy failure when
+              the player found a high-quality ratio but did not reach the exact
+              optimum. Keeps tone neutral and non-judgmental. */}
+          {mechanism === 'trap' && feedback && !feedback.exactOptimal && feedback.qualityRatio >= 0.9 && (
+            <div className="feedback-pedagogy">
+              You chose a high-ratio item, but a different combination yields a
+              higher total — this is the greedy "decoy" trap: the locally best
+              item prevents a better pair from fitting. Try looking for pairs
+              that together beat the single high-ratio item.
+            </div>
+          )}
         </div>
       )}
 

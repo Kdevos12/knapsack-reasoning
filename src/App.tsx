@@ -15,6 +15,7 @@ import {
   drawCorrelation,
   drawDim2AndConflict,
   generateInstance,
+  scaledTimeLimitSeconds,
   type CorrelationBag,
   type ConflictBag,
   type Dim2Bag,
@@ -82,6 +83,7 @@ function App() {
   const [round, setRound] = useState(0);
   const [instance, setInstance] = useState<SolvedInstance | null>(null);
   const [currentCorrelation, setCurrentCorrelation] = useState<CorrelationType>('uncorrelated');
+  const [currentMechanism, setCurrentMechanism] = useState<'none' | 'trap' | 'dim2' | 'conflict'>('none');
   const [selected, setSelected] = useState<boolean[]>([]);
   const [trials, setTrials] = useState<Trial[]>([]);
   const [phase, setPhase] = useState<Phase>('playing');
@@ -99,6 +101,8 @@ function App() {
   // non-optimal answer shows a prompt instead of recording the trial.
   // If the player confirms, the trial is recorded normally.
   const [pendingWarning, setPendingWarning] = useState(false);
+  const [warningCount, setWarningCount] = useState(0);
+  const MAX_SUBOPTIMAL_WARNINGS = 1;
 
   const currentDifficulty = staircase?.difficulty ?? 0;
 
@@ -120,7 +124,9 @@ function App() {
       setDim2Bag(nextDim2Bag);
       setConflictBag(nextConflictBag);
       setCurrentCorrelation(params.correlation);
-      const solved = solveKnapsack(generateInstance(params, Math.floor(Math.random() * 2 ** 31)));
+      // Track which mechanism is active for pedagogical messaging
+      setCurrentMechanism(params.trap ? 'trap' : params.dim2 ? 'dim2' : params.conflict ? 'conflict' : 'none');
+      const solved = solveKnapsack(generateInstance(params, Math.floor(Math.random() * 2 ** 31), currentDifficulty));
       setInstance(solved);
       setSelected(new Array(solved.weights.length).fill(false));
       setPrevSelected(null);
@@ -128,8 +134,10 @@ function App() {
       setPhase('playing');
       setLastTrial(null);
       setPendingWarning(false);
+      setWarningCount(0);
       startedAtRef.current = Date.now();
-      setTimeLeftMs(cfg.timeMode === 'timed' ? cfg.timeLimitSeconds * 1000 : null);
+      const timeMs = cfg.timeMode === 'timed' ? scaledTimeLimitSeconds(cfg.timeLimitSeconds, params) * 1000 : null;
+      setTimeLeftMs(timeMs);
     },
     [],
   );
@@ -203,6 +211,7 @@ function App() {
     (feasible: boolean, totalValue: number) => {
       if (!instance) return;
       const qualityRatio = feasible && instance.optimalValue > 0 ? totalValue / instance.optimalValue : 0;
+      const exactOptimal = feasible && totalValue === instance.optimalValue;
       const success = feasible && qualityRatio >= SUCCESS_QUALITY_THRESHOLD;
       const timeUsedMs = Date.now() - startedAtRef.current;
       const timeLimitMs = config.timeMode === 'timed' ? config.timeLimitSeconds * 1000 : null;
@@ -212,6 +221,7 @@ function App() {
         difficulty: currentDifficulty,
         correlation: currentCorrelation,
         success,
+        exactOptimal,
         qualityRatio,
         timeUsedMs,
         timeLimitMs,
@@ -225,7 +235,7 @@ function App() {
       if (success && config.soundEnabled) playSuccessChime();
 
       if (config.mode === 'adaptive' && staircase) {
-        const next = updateStaircase(staircase, success);
+        const next = updateStaircase(staircase, exactOptimal);
         setStaircase(next);
         saveDifficulty(next.difficulty);
       }
@@ -245,14 +255,15 @@ function App() {
       totalWeight <= instance.capacity &&
       (instance.capacity2 === undefined || totalWeight2 <= instance.capacity2) &&
       conflictOk;
-    const qualityRatio = feasible && instance.optimalValue > 0 ? totalValue / instance.optimalValue : 0;
-    const success = feasible && qualityRatio >= SUCCESS_QUALITY_THRESHOLD;
+    const exactOptimal = feasible && totalValue === instance.optimalValue;
 
-    // If the warning setting is on and the solution is sub-optimal, pause and
-    // show the warning prompt instead of recording immediately. The player can
-    // go back to adjust or confirm the submission as-is.
-    if (config.subOptimalWarning && !success && !pendingWarning) {
+    // If the warning setting is on and the solution is sub-optimal (in the
+    // computational sense), pause and show the warning prompt instead of
+    // recording immediately. Cap warnings per round to avoid unbounded
+    // trial-and-error loops.
+    if (config.subOptimalWarning && !exactOptimal && !pendingWarning && warningCount < MAX_SUBOPTIMAL_WARNINGS) {
       setPendingWarning(true);
+      setWarningCount((c) => c + 1);
       return;
     }
 
@@ -329,6 +340,7 @@ function App() {
             config={config}
             difficulty={currentDifficulty}
             correlation={currentCorrelation}
+            mechanism={currentMechanism}
             pendingWarning={pendingWarning}
             onWarningConfirm={dismissWarningAndSubmit}
             onWarningDismiss={dismissWarningAndContinue}
