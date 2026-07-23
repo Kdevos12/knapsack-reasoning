@@ -6,6 +6,27 @@ function lerp(min: number, max: number, t: number): number {
   return min + (max - min) * Math.max(0, Math.min(1, t));
 }
 
+// Scale base time limit by the complexity mechanisms active in the instance.
+// A fixed time budget doesn't account for the fact that dim2 (two independent
+// constraints), conflict (graph reasoning), and higher item counts all require
+// more human reasoning time (Yadav et al. 2018: resolution time peaks near
+// phase transition and grows with problem complexity). This avoids making
+// high-difficulty rounds artificially time-constrained in a way unrelated to
+// the reasoning challenge itself.
+export function scaledTimeLimitSeconds(
+  baseSeconds: number,
+  params: GenerationParams,
+): number {
+  let factor = 1;
+  if (params.dim2) factor += 0.4; // Second constraint adds ~40% time
+  if (params.conflict) factor += 0.3; // Graph constraints add ~30% time
+  // Each item beyond minimum adds ~3% per item for increased combinatorial
+  // reasoning overhead (measured from human study literature on the phases
+  // of knapsack reasoning).
+  factor += Math.max(0, params.nItems - SAFETY_BOUNDS.nItemsMin) * 0.03;
+  return Math.round(baseSeconds * factor);
+}
+
 // Empirically measured (see repo history): greedy-by-ratio's success rate
 // against the exact DP optimum climbs toward 100% as nItems grows, *at any*
 // fixed correlation type — more items let a naive fill converge on the
@@ -508,6 +529,28 @@ export function unlockedCorrelations(difficulty: number): CorrelationType[] {
   return pool;
 }
 
+// Calculate tightness anchored to each correlation type's unlock point,
+// not globally from D0. This prevents collapse-at-unlock pattern where a type
+// suddenly appears with tightness already set by 150+ points of prior growth.
+// Same calibration logic as dim2: reset at unlock, ramp over 400-point window.
+export function correlationTightnessFor(
+  difficulty: number,
+  correlation: CorrelationType,
+): number {
+  const unlocks = {
+    uncorrelated: 0,
+    weakly_correlated: 30,
+    strongly_correlated: 60,
+    subset_sum: 85,
+  };
+  const unlockDifficulty = unlocks[correlation];
+
+  if (difficulty < unlockDifficulty) return 0;
+
+  const sinceUnlock = difficulty - unlockDifficulty;
+  return Math.min(1, sinceUnlock / 400);
+}
+
 export interface CorrelationBag {
   pool: CorrelationType[];
   queue: CorrelationType[];
@@ -585,9 +628,16 @@ function jointValuesForDim2(weights1: number[], weights2: number[], spread1: num
   });
 }
 
-export function generateInstance(params: GenerationParams, seed: number = Date.now()): KnapsackInstance {
+export function generateInstance(
+  params: GenerationParams,
+  seed: number = Date.now(),
+  difficulty: number = 0,
+): KnapsackInstance {
   const rng = mulberry32(seed);
-  const { nItems, capacityRatio, correlation, correlationTightness = 0, dim2 } = params;
+  const { nItems, capacityRatio, correlation, dim2 } = params;
+
+  // Use correlation-specific tightness anchored to that type's unlock point.
+  const correlationTightness = correlationTightnessFor(difficulty, correlation);
 
   // See MAX_SPREAD_WITH_DIM2: dimension 1 is clamped to a bounded, fixed
   // range whenever a second constraint is active so the 2D DP table can't
