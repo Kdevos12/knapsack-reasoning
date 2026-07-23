@@ -198,19 +198,23 @@ function GameScreen({
       {/* Feedback panel — placed ABOVE the board so it's front-and-center */}
       {feedback && (
         <div className="feedback-panel">
-          <div className={`feedback-title ${feedback.success ? 'success' : 'failure'}`}>
-            {feedback.success ? 'Optimal!' : 'Not optimal'}
+          <div className={`feedback-title ${feedback.exactOptimal ? 'success' : 'failure'}`}>
+            {feedback.exactOptimal ? 'Optimal!' : 'Not optimal'}
           </div>
           <div className="feedback-gauge-row">
             <div className="gauge feedback-gauge">
               <div
-                className={`gauge-fill${feedback.success ? '' : ' partial'}`}
+                className={`gauge-fill${feedback.exactOptimal ? '' : ' partial'}`}
                 style={{ width: `${optimalityPct}%` }}
               />
             </div>
             <span className="feedback-pct">{optimalityPct}% of optimum</span>
           </div>
-          <div className="feedback-hint">Gold-ringed tiles are the optimal selection — compare it with yours.</div>
+          <div className="feedback-hint">
+            {feedback.exactOptimal
+              ? 'Perfect — you matched the true optimal selection.'
+              : 'Gold-ringed tiles show the optimal selection — compare it with yours.'}
+          </div>
           {/* Pedagogical hint for trap rounds: explain greedy-decoy failure when
               the player found a high-quality ratio but did not reach the exact
               optimum. Keeps tone neutral and non-judgmental. */}
