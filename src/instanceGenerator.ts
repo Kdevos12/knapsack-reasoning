@@ -13,6 +13,28 @@ function lerp(min: number, max: number, t: number): number {
 // approaches the LP relaxation as n grows). Item count is capped well below
 // where that washout kicks in, so it can't become the difficulty lever;
 // spread has no such effect (measured flat) and keeps scaling freely.
+
+// Module-level function to get calibrated lerp bounds for a given correlation type.
+// Used to adjust offset ranges in generateInstance to achieve target calibration success.
+export function getCorrelationLerpBounds(
+  correlation: CorrelationType,
+): [number, number] {
+  // Return [offsetAtTightness0, offsetAtTightness1] calibrated to achieve
+  // target 30-50% exact-optimal success at each correlation's unlock difficulty.
+  switch (correlation) {
+    case "uncorrelated":
+      return [0.5, 0.2]; // Higher offset to reduce success from 96.7% -> ~40%
+    case "weakly_correlated":
+      return [0.12, 0.05]; // 40% success at D30 - OK
+    case "strongly_correlated":
+      return [0.35, 0.12]; // 36.7% success at D60 - OK
+    case "subset_sum":
+      return [0.5, 0.15]; // 43.3% success at D90 - OK
+    default:
+      return [0.2, 0.08];
+  }
+}
+
 const MAX_EXTRA_ITEMS = 10;
 
 // Deterministic difficulty -> generation params mapping (everything except
