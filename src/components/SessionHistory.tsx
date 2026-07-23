@@ -85,18 +85,18 @@ function SessionHistory({ trials, onNewSession }: SessionHistoryProps) {
                 <th>Time</th>
               </tr>
             </thead>
-            <tbody>
-              {trials.map((t, i) => (
-                <tr key={i} className={t.success ? 'success' : 'failure'}>
-                  <td>{t.round + 1}</td>
-                  <td>{Math.round(t.difficulty)}</td>
-                  <td>{CORRELATION_LABELS[t.correlation]}</td>
-                  <td>{t.success ? 'Optimal' : 'Sub-optimal'}</td>
-                  <td>{(t.qualityRatio * 100).toFixed(0)}%</td>
-                  <td>{(t.timeUsedMs / 1000).toFixed(1)}s</td>
-                </tr>
-              ))}
-            </tbody>
+              <tbody>
+                {trials.map((t, i) => (
+                  <tr key={i} className={t.exactOptimal ? 'success' : 'failure'}>
+                    <td>{t.round + 1}</td>
+                    <td>{Math.round(t.difficulty)}</td>
+                    <td>{CORRELATION_LABELS[t.correlation]}</td>
+                    <td>{t.exactOptimal ? 'Optimal' : 'Sub-optimal'}</td>
+                    <td>{(t.qualityRatio * 100).toFixed(0)}%</td>
+                    <td>{(t.timeUsedMs / 1000).toFixed(1)}s</td>
+                  </tr>
+                ))}
+              </tbody>
           </table>
         )}
       </div>
